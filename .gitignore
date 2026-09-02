@@ -1,0 +1,9 @@
+.tools/
+.cache/
+node_modules/
+bin/
+internal/webassets/dist/
+web/dist/
+*.tsbuildinfo
+.DS_Store
+

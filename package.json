@@ -1,0 +1,21 @@
+{
+  "name": "streamline",
+  "private": true,
+  "packageManager": "bun@1.4.0",
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "scripts": {
+    "dev": "concurrently --kill-others --names api,web \"make dev-go\" \"make dev-web\""
+  },
+  "devDependencies": {
+    "concurrently": "9.2.4"
+  },
+  "workspaces": [
+    "web"
+  ],
+  "trustedDependencies": [
+    "@tailwindcss/oxide",
+    "esbuild"
+  ]
+}

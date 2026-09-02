@@ -1,0 +1,34 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Attach to Streamline frontend",
+      "type": "chrome",
+      "request": "attach",
+      "address": "127.0.0.1",
+      "port": 9222,
+      "urlFilter": "http://localhost:5173/*",
+      "webRoot": "${workspaceFolder}/web",
+      "sourceMaps": true,
+      "skipFiles": [
+        "<node_internals>/**",
+        "**/node_modules/**"
+      ]
+    },
+    {
+      "name": "Start Streamline and attach",
+      "type": "chrome",
+      "request": "attach",
+      "address": "127.0.0.1",
+      "port": 9222,
+      "urlFilter": "http://localhost:5173/*",
+      "webRoot": "${workspaceFolder}/web",
+      "sourceMaps": true,
+      "skipFiles": [
+        "<node_internals>/**",
+        "**/node_modules/**"
+      ],
+      "preLaunchTask": "Streamline: dev"
+    }
+  ]
+}

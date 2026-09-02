@@ -1,0 +1,13 @@
+{
+  "go.alternateTools": {
+    "go": "/home/linuxbrew/.linuxbrew/bin/go"
+  },
+  "go.buildTags": "dev",
+  "go.toolsEnvVars": {
+    "GOCACHE": "${workspaceFolder}/.cache/go-build",
+    "GOMODCACHE": "${workspaceFolder}/.cache/go-mod",
+    "GOTOOLCHAIN": "local",
+    "CGO_ENABLED": "0"
+  },
+  "typescript.tsdk": "web/node_modules/typescript/lib"
+}
