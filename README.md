@@ -1,0 +1,1 @@
+# Easy pluggable logger with web interface
