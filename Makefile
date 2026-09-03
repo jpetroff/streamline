@@ -53,6 +53,8 @@ run: build
 
 check:
 	$(BUN) run --bun --filter @streamline/web check
+	$(BUN) run --bun --filter @streamline/web test
+	$(GO) test -tags=dev ./...
 	$(GO) vet -tags=dev ./...
 	@unformatted="$$( $(GOFMT) -l cmd internal )" && test -z "$$unformatted" || \
 	  { printf '%s\n' 'Go formatting check failed; run $(GOFMT) -w cmd internal'; exit 1; }

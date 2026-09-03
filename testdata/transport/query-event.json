@@ -1,0 +1,21 @@
+{
+  "type": "snapshot",
+  "state": {
+    "queryId": "query-1",
+    "status": "ready",
+    "snapshot": {
+      "sessionId": "session-1",
+      "generationId": "1",
+      "queryId": "query-1",
+      "revision": "2",
+      "processedThrough": "9007199254740993",
+      "matchedCount": "201",
+      "snapshotToken": "opaque-token"
+    }
+  },
+  "session": {
+    "sessionId": "session-1",
+    "generationId": "1",
+    "inputStatus": "streaming"
+  }
+}

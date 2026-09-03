@@ -5,14 +5,57 @@
 | Area | Responsibility |
 | --- | --- |
 | `cmd/streamline` | CLI port, loopback listener, graceful shutdown |
-| `internal/httpapi` | `GET /api/v1/health` → `{"status":"ok"}`; unknown API routes return 404 |
+| `internal/httpapi` | Versioned session/query JSON endpoints, bounded row pages, SSE state notifications, and health |
+| `internal/query` | In-memory query lifecycle, immutable snapshot boundaries, live result indexes, subscriptions, and compiler boundary |
 | `internal/webassets` | Embedded frontend in release builds; development build excludes assets |
-| `web` | Empty Svelte 5 + TypeScript app, Vite, Tailwind 4 |
+| `web` | Svelte 5 viewer controller, HTTP/SSE client, 32 MB page cache, filter/follow/pagination shell |
 | UI foundations | shadcn-svelte configuration, Bits UI, neutral theme, class utility |
 | Installed for later | TanStack Svelte Virtual and ECharts |
 
 The server uses Go's standard library and builds with CGo disabled.
-No ingestion, query engine, storage, profiles, graphs, or SSE are implemented.
+No stdin ingestion, parser, shared filter-expression compiler, profiles, or graphs are implemented. The production service currently accepts the unfiltered input-order query; ingestion will call its batch append hook and the query engine will provide the compiler.
+
+## Implemented binary–frontend protocol
+
+All application routes use `/api/v1`. Commands and bounded data use JSON over
+HTTP; SSE only announces authoritative query/session state and never carries log
+rows.
+
+| Route | Contract |
+| --- | --- |
+| `GET /session` | Session/generation identity and `streaming`, `eof`, or `error` input state |
+| `POST /queries` | Create an immutable filter/sort query; returns `202` with `building` or `ready` state |
+| `GET /queries/{id}` | Resynchronize authoritative progress and latest snapshot |
+| `GET /queries/{id}/rows` | Read `offset`/`limit` rows from an opaque `snapshot` token; default 200, maximum 1,000 |
+| `GET /queries/{id}/events` | Initial state followed by coalesced progress, snapshot, input, and generation events |
+| `DELETE /queries/{id}` | Cancel and release a query without deleting captured records |
+
+Snapshots carry session, generation, query, revision, processed-input boundary,
+matching count, and token. Identifiers and 64-bit values are decimal strings in
+JSON. A token captures a logical prefix of a query's matching-ID index, so its
+pagination remains stable while newer revisions append matches. Query scans
+catch up records accepted during their initial scan before publishing the first
+complete snapshot.
+
+Each SSE subscription gets current state before later notifications, has a
+one-item latest-state queue, and coalesces ordinary publication for 100 ms.
+Streams send 15-second heartbeats and use five-second write deadlines. Connected
+subscribers pin a query; disconnected queries have a 60-second grace period.
+The browser resynchronizes through `GET` after stream errors rather than relying
+on event replay.
+
+The Svelte viewer keeps the previous results while a replacement filter builds,
+then swaps only after the new query page is available. Every request is guarded
+by a local intent and query/snapshot revision. Older-window navigation pauses
+the displayed snapshot; Resume reads the current query state and jumps to its
+latest tail. Full prefix pages can be reused between append-only revisions, but
+a partial tail is refetched. A missing paused snapshot becomes an explicit
+refresh state.
+
+`query.Compiler` is the integration boundary for the future shared filter
+expression tree. `MemoryService.Append` and `SetInputStatus` are the ingestion integration
+hooks. A future profile service emits generation events through the query-service
+contract; the following frontend then builds an atomic replacement query.
 
 ## Planned first version
 

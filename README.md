@@ -4,7 +4,13 @@ Scaffolding for a local log viewer: a Go binary and an empty Svelte web interfac
 
 ## Get started
 
-Requires global Go 1.27.1+ from Linuxbrew, global Bun 1.4.0+, and Make.
+Requires global:
+* Go 1.27.1+, 
+
+* Bun 1.4.0+, 
+
+* Make.
+ 
 See the [development setup](.memory/development.md#setup) for installation and
 custom Homebrew paths.
 

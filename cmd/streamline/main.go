@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"streamline/internal/httpapi"
+	"streamline/internal/query"
 	"streamline/internal/webassets"
 )
 
@@ -41,8 +42,9 @@ func run(port int) error {
 	}
 	defer listener.Close()
 
+	queryService := query.NewMemoryService(nil)
 	server := &http.Server{
-		Handler:           httpapi.NewHandler(webassets.Handler()),
+		Handler:           httpapi.NewHandler(webassets.Handler(), queryService),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
