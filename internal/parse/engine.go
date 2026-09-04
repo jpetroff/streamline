@@ -31,10 +31,31 @@ type LoadDiagnostic struct {
 	RawEnd     int
 }
 
-// LoadResult owns the original input once and references it by byte offsets.
+// ResultKind identifies the mutually exclusive parser output selected for a source.
+type ResultKind string
+
+const (
+	ResultParsed ResultKind = "parsed"
+	ResultRaw    ResultKind = "raw"
+)
+
+// ParsedResult contains normalized records from a recognized log stream.
+type ParsedResult struct {
+	Records []CapturedRecord
+}
+
+// RawResult contains display-safe text when no record identifies the input as logs.
+type RawResult struct {
+	Text string
+}
+
+// LoadResult owns the exact source once and selects exactly one output variant.
+// CapturedRecord offsets refer to Source.
 type LoadResult struct {
-	Raw         []byte
-	Records     []CapturedRecord
+	Kind        ResultKind
+	Source      []byte
+	Parsed      *ParsedResult
+	Raw         *RawResult
 	Diagnostics []LoadDiagnostic
 }
 
@@ -59,16 +80,27 @@ func NewEngine(options Options) *Engine {
 	return &Engine{options: options}
 }
 
-// Load reads the source into memory and normalizes every physical record.
-// If the reader fails, bytes read before the failure are still parsed and
-// returned together with the wrapped error.
+// Load reads and classifies a complete source without progressive callbacks.
 func (e *Engine) Load(reader io.Reader) (*LoadResult, error) {
-	raw, readErr := io.ReadAll(reader)
-	result := &LoadResult{Raw: raw}
-	context := e.context()
+	return e.Stream(reader, nil)
+}
 
-	for _, source := range splitFrames(raw) {
-		cleaned := sanitizeBytes(raw[source.start:source.contentEnd], false)
+// Stream reads and classifies a source, emitting completed normalized records
+// after the first recognizable log record. A preamble is buffered until that
+// decision and emitted before the recognizing record. If the reader fails,
+// bytes read before the failure are finalized and returned with the wrapped error.
+func (e *Engine) Stream(reader io.Reader, emit func([]CapturedRecord)) (*LoadResult, error) {
+	result := &LoadResult{}
+	context := e.context()
+	records := make([]CapturedRecord, 0)
+	frameStart := 0
+	scanPosition := 0
+	emitted := 0
+	recognized := false
+	buffer := make([]byte, 32<<10)
+
+	processFrame := func(source frame) {
+		cleaned := sanitizeBytes(result.Source[source.start:source.contentEnd], false)
 		trimmed := strings.TrimSpace(cleaned.text)
 		if trimmed == "" || isPagerArtifact(trimmed, cleaned.hadTerminal) {
 			if cleaned.hadTerminal {
@@ -81,7 +113,7 @@ func (e *Engine) Load(reader io.Reader) (*LoadResult, error) {
 					RawEnd:   source.end,
 				})
 			}
-			continue
+			return
 		}
 
 		diagnostics := make([]logmodel.Diagnostic, 0, 3)
@@ -91,22 +123,89 @@ func (e *Engine) Load(reader io.Reader) (*LoadResult, error) {
 		if cleaned.invalidUTF8 {
 			addDiagnostic(&diagnostics, "invalid_utf8_replaced", "invalid UTF-8 bytes were replaced")
 		}
-		if hasLessTruncation(raw[source.start:source.contentEnd], trimmed) {
+		if hasLessTruncation(result.Source[source.start:source.contentEnd], trimmed) {
 			addDiagnostic(&diagnostics, "terminal_truncated", "a terminal pager truncation marker indicates missing source text")
 		}
 
-		result.Records = append(result.Records, CapturedRecord{
-			Entry:    parseRecord(cleaned.text, context, diagnostics),
+		entry, identifiesLogs := parseRecord(cleaned.text, context, diagnostics)
+		records = append(records, CapturedRecord{
+			Entry:    entry,
 			RawStart: source.start,
 			RawEnd:   source.end,
 		})
+		if identifiesLogs {
+			recognized = true
+		}
 	}
 
-	if readErr != nil {
+	processAvailable := func(final bool) {
+		for index := scanPosition; index < len(result.Source); index++ {
+			if result.Source[index] != '\n' && result.Source[index] != '\r' {
+				continue
+			}
+			contentEnd := index
+			end := index + 1
+			if result.Source[index] == '\r' {
+				if end == len(result.Source) && !final {
+					scanPosition = index
+					return
+				}
+				if end < len(result.Source) && result.Source[end] == '\n' {
+					end++
+				}
+			}
+			processFrame(frame{start: frameStart, contentEnd: contentEnd, end: end})
+			frameStart = end
+			index = end - 1
+		}
+		scanPosition = len(result.Source)
+		if final && frameStart < len(result.Source) {
+			processFrame(frame{start: frameStart, contentEnd: len(result.Source), end: len(result.Source)})
+			frameStart = len(result.Source)
+		}
+	}
+
+	emitReady := func() {
+		if !recognized || emitted == len(records) || emit == nil {
+			return
+		}
+		batch := append([]CapturedRecord(nil), records[emitted:]...)
+		emitted = len(records)
+		emit(batch)
+	}
+
+	var readErr error
+	for {
+		readCount, err := reader.Read(buffer)
+		if readCount > 0 {
+			result.Source = append(result.Source, buffer[:readCount]...)
+			processAvailable(false)
+			emitReady()
+		}
+		if err != nil {
+			readErr = err
+			break
+		}
+		if readCount == 0 {
+			continue
+		}
+	}
+
+	processAvailable(true)
+	emitReady()
+	if recognized {
+		result.Kind = ResultParsed
+		result.Parsed = &ParsedResult{Records: records}
+	} else {
+		result.Kind = ResultRaw
+		result.Raw = &RawResult{Text: sanitizeBytes(result.Source, true).text}
+	}
+
+	if readErr != nil && readErr != io.EOF {
 		result.Diagnostics = append(result.Diagnostics, LoadDiagnostic{
 			Diagnostic: logmodel.Diagnostic{Code: "input_read_error", Message: readErr.Error()},
-			RawStart:   len(raw),
-			RawEnd:     len(raw),
+			RawStart:   len(result.Source),
+			RawEnd:     len(result.Source),
 		})
 		return result, fmt.Errorf("read log input: %w", readErr)
 	}
@@ -123,26 +222,4 @@ func (e *Engine) context() parseContext {
 		reference = time.Now()
 	}
 	return parseContext{location: location, reference: reference.In(location)}
-}
-
-func splitFrames(raw []byte) []frame {
-	frames := make([]frame, 0)
-	start := 0
-	for index := 0; index < len(raw); index++ {
-		if raw[index] != '\n' && raw[index] != '\r' {
-			continue
-		}
-		contentEnd := index
-		end := index + 1
-		if raw[index] == '\r' && end < len(raw) && raw[end] == '\n' {
-			end++
-			index++
-		}
-		frames = append(frames, frame{start: start, contentEnd: contentEnd, end: end})
-		start = end
-	}
-	if start < len(raw) {
-		frames = append(frames, frame{start: start, contentEnd: len(raw), end: len(raw)})
-	}
-	return frames
 }

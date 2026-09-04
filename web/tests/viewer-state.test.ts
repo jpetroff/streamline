@@ -102,3 +102,29 @@ test('structured log row contract carries typed fields and parser metadata', () 
   expect(decoded.sourceFormat).toBe('json');
   expect(decoded.diagnostics?.[0].code).toBe('normalized');
 });
+
+
+test('raw pages append only at the current generation cursor', () => {
+  const started = reduceViewer(
+    { following: true, needsRefresh: false },
+    { type: 'rawStart', generationId: '2' },
+  );
+  const stale = reduceViewer(started, {
+    type: 'rawPage',
+    page: { generationId: '1', offset: '0', totalChunks: '1', chunks: ['stale'] },
+  });
+  expect(stale).toBe(started);
+
+  const loaded = reduceViewer(started, {
+    type: 'rawPage',
+    page: { generationId: '2', offset: '0', totalChunks: '2', chunks: ['one'] },
+  });
+  expect(loaded.raw?.chunks).toEqual(['one']);
+  expect(loaded.raw?.nextOffset).toBe('1');
+
+  const outOfOrder = reduceViewer(loaded, {
+    type: 'rawPage',
+    page: { generationId: '2', offset: '0', totalChunks: '2', chunks: ['duplicate'] },
+  });
+  expect(outOfOrder).toBe(loaded);
+});

@@ -12,16 +12,20 @@ import (
 	"streamline/internal/logmodel"
 )
 
-const disconnectedGrace = 60 * time.Second
+const (
+	disconnectedGrace = 60 * time.Second
+	rawChunkSize      = 64 << 10
+)
 
 type MemoryService struct {
-	mu       sync.Mutex
-	session  Session
-	compiler Compiler
-	records  []Record
-	queries  map[string]*memoryQuery
-	now      func() time.Time
-	grace    time.Duration
+	mu        sync.Mutex
+	session   Session
+	compiler  Compiler
+	records   []Record
+	rawChunks []string
+	queries   map[string]*memoryQuery
+	now       func() time.Time
+	grace     time.Duration
 }
 
 type memoryQuery struct {
@@ -60,7 +64,7 @@ func NewMemoryService(compiler Compiler) *MemoryService {
 		compiler = MatchEmptyCompiler{}
 	}
 	return &MemoryService{
-		session:  Session{SessionID: randomID(), GenerationID: "1", InputStatus: InputStreaming},
+		session:  Session{SessionID: randomID(), GenerationID: "1", InputStatus: InputStreaming, InputKind: InputPending},
 		compiler: compiler,
 		queries:  make(map[string]*memoryQuery),
 		now:      time.Now,
@@ -73,6 +77,32 @@ func (s *MemoryService) Session(context.Context) Session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.session
+}
+
+// Raw returns a stable page of display-safe stdin chunks for the current generation.
+func (s *MemoryService) Raw(_ context.Context, generation string, offset uint64, limit int) (RawChunkPage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.session.InputKind != InputRaw {
+		return RawChunkPage{}, ErrRawUnavailable
+	}
+	if generation != s.session.GenerationID {
+		return RawChunkPage{}, ErrGenerationChanged
+	}
+	if offset > uint64(len(s.rawChunks)) {
+		return RawChunkPage{}, &APIError{Code: "invalid_offset", Message: "offset exceeds the available raw output"}
+	}
+	end := int(offset) + limit
+	if end > len(s.rawChunks) {
+		end = len(s.rawChunks)
+	}
+	chunks := append([]string(nil), s.rawChunks[int(offset):end]...)
+	return RawChunkPage{
+		GenerationID: s.session.GenerationID,
+		Offset:       strconv.FormatUint(offset, 10),
+		TotalChunks:  strconv.Itoa(len(s.rawChunks)),
+		Chunks:       chunks,
+	}, nil
 }
 
 // Create compiles a filter, captures the committed boundary, and starts an atomic initial scan.
@@ -245,6 +275,9 @@ func (s *MemoryService) Append(records []Record) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.session.InputKind == InputPending {
+		s.session.InputKind = InputRecords
+	}
 	appended := make([]Record, 0, len(records))
 	for i := range records {
 		record := logmodel.CloneRecord(records[i])
@@ -274,6 +307,19 @@ func (s *MemoryService) SetInputStatus(status InputStatus, inputErr *APIError) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.session.InputStatus, s.session.Error = status, inputErr
+	for _, q := range s.queries {
+		s.pushLocked(q, "input")
+	}
+}
+
+// SetRawOutput atomically publishes terminal display-safe stdin text and status.
+func (s *MemoryService) SetRawOutput(output string, status InputStatus, inputErr *APIError) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rawChunks = splitRawChunks(output)
+	s.session.InputKind = InputRaw
+	s.session.InputStatus = status
+	s.session.Error = inputErr
 	for _, q := range s.queries {
 		s.pushLocked(q, "input")
 	}
@@ -374,4 +420,26 @@ func randomID() string {
 		panic(err)
 	}
 	return hex.EncodeToString(value[:])
+}
+
+// splitRawChunks creates UTF-8-safe transport chunks without inserting separators.
+func splitRawChunks(output string) []string {
+	if output == "" {
+		return nil
+	}
+	data := []byte(output)
+	chunks := make([]string, 0, (len(data)+rawChunkSize-1)/rawChunkSize)
+	for start := 0; start < len(data); {
+		end := start + rawChunkSize
+		if end >= len(data) {
+			end = len(data)
+		} else {
+			for end > start && data[end]&0xc0 == 0x80 {
+				end--
+			}
+		}
+		chunks = append(chunks, string(data[start:end]))
+		start = end
+	}
+	return chunks
 }

@@ -12,26 +12,27 @@ import (
 	"streamline/internal/logmodel"
 )
 
-func parseRecord(input string, context parseContext, diagnostics []logmodel.Diagnostic) logmodel.Record {
+func parseRecord(input string, context parseContext, diagnostics []logmodel.Diagnostic) (logmodel.Record, bool) {
 	trimmed := strings.TrimSpace(input)
 	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
 		value, err := decodeJSON(trimmed)
 		if err != nil {
 			addDiagnostic(&diagnostics, "malformed_json_fallback", "JSON-like input could not be decoded and was retained as text")
-			return normalizeText(input, context, diagnostics)
+			return normalizeText(input, context, diagnostics), false
 		}
 		object, ok := value.(map[string]any)
 		if !ok {
 			addDiagnostic(&diagnostics, "unsupported_json_root", "only JSON objects are normalized as structured log records")
-			return normalizeText(input, context, diagnostics)
+			return normalizeText(input, context, diagnostics), false
 		}
 		object = cleanJSONObject(object, &diagnostics)
 		if looksLikeJournald(object) {
-			return normalizeJournald(object, diagnostics)
+			return normalizeJournald(object, diagnostics), true
 		}
-		return normalizeJSON(object, context, diagnostics)
+		return normalizeJSON(object, context, diagnostics), true
 	}
-	return normalizeText(input, context, diagnostics)
+	record := normalizeText(input, context, diagnostics)
+	return record, record.Timestamp != ""
 }
 
 func decodeJSON(input string) (any, error) {

@@ -5,11 +5,11 @@ dark log table rendered by Svelte. It covers the current frontend shell,
 reactivity, viewport paging, row virtualization, follow behavior, accessibility,
 and the annotation conventions used by the code.
 
-The frontend is a presentation client. Go owns captured records, parsing,
-filtering, result indexes, and immutable snapshots. Svelte owns the browser
-lifecycle, visible state, scrolling, and DOM projection. The binary currently
-does not connect stdin to the query service, so a normal launch renders the
-complete shell and an empty log table until ingestion is implemented.
+The frontend is a presentation client. Go owns stdin capture, classification,
+parsing, result indexes, raw chunks, and immutable snapshots. Svelte owns the
+browser lifecycle, visible state, scrolling, and DOM projection. It shows a
+waiting state, parsed virtual rows, or terminal raw text according to session
+`inputKind`.
 
 ## Source map
 
@@ -17,7 +17,8 @@ complete shell and an empty log table until ingestion is implemented.
 | --- | --- |
 | `web/src/App.svelte` | Root component, controller ownership, full-viewport shell |
 | `web/src/app.css` | Dark-only tokens, Tailwind theme mapping, viewport containment |
-| `web/src/lib/components/VirtualLogTable.svelte` | Visible table, Svelte runes, TanStack adapter, scroll/follow behavior |
+| `web/src/lib/components/VirtualLogTable.svelte` | Parsed table, Svelte runes, TanStack adapter, scroll/follow behavior |
+| `web/src/lib/components/RawOutput.svelte` | Preformatted raw text and sequential chunk loading |
 | `web/src/lib/virtual-window.ts` | Bigint-safe segment and page-coordinate calculations |
 | `web/src/lib/transport/viewer-controller.ts` | Query lifecycle, SSE recovery, page loading, race guards |
 | `web/src/lib/transport/viewer-state.ts` | Immutable display model and pure reducer |
@@ -30,21 +31,20 @@ complete shell and an empty log table until ingestion is implemented.
 `html`, `body`, and `#app` are all exactly the viewport height and hide document
 overflow. `App.svelte` then creates a two-column, two-row CSS grid:
 
-- row 1 is the empty 48 px application bar and spans both columns;
+- row 1 is a 48 px application bar with the stdin source select and spans both columns;
 - column 1 is the empty 224 px sidebar below the bar;
 - the remaining cell is the log surface;
 - `minmax(0, 1fr)`, `min-h-0`, and `min-w-0` allow the log surface to shrink
   within the grid instead of forcing document-level overflow;
 - the virtual table's row-group element is the only vertical scroll container.
 
-`App.svelte` intentionally does not populate the bar or sidebar. They are stable
-layout regions for later controls and carry accessible labels, but they do not
-create navigation or actions in the current shell.
+`App.svelte` keeps the sidebar empty. The header contains a native source
+select with stdin active and disabled file/command placeholders.
 
 ```mermaid
 flowchart TB
   Viewport["html / body / #app<br/>height: 100%; overflow: hidden"] --> Shell["App grid<br/>columns: 224px + minmax(0, 1fr)<br/>rows: 48px + minmax(0, 1fr)"]
-  Shell --> Top["Empty application bar<br/>48px, spans both columns"]
+  Shell --> Top["Application bar<br/>stdin select + disabled placeholders"]
   Shell --> Sidebar["Empty sidebar<br/>224px"]
   Shell --> Main["Main log region<br/>min-width/min-height: 0"]
   Main --> Table["VirtualLogTable<br/>column header + scroll row group"]
@@ -70,7 +70,7 @@ Svelte `$state` value from `controller.state`. During `onMount` it:
 
 1. subscribes to complete immutable `ViewerState` snapshots;
 2. assigns each snapshot to the reactive `viewer` value;
-3. starts the default empty, input-ordered query with `setQuery('')`;
+3. calls `start()`, which reads the session and chooses query or raw mode;
 4. returns cleanup that unsubscribes, aborts requests, closes EventSource
    connections, releases server queries, and clears the page cache.
 
@@ -78,9 +78,16 @@ The controller is created before mount, but network and browser-lifecycle work
 starts only in `onMount`. This keeps resource ownership aligned with the Svelte
 component lifetime.
 
-`viewer` and `controller` are passed to `VirtualLogTable` as typed `$props`.
-The component does not call `fetch` or construct `EventSource` directly. It
-expresses viewport intent to the controller and renders the resulting state.
+`viewer` and `controller` are passed to either `VirtualLogTable` or
+`RawOutput` as typed `$props`. Components do not call `fetch` or construct
+`EventSource` directly; they express viewport or next-chunk intent to the controller.
+
+## Input-mode rendering
+
+`App.svelte` renders Connecting before session recovery, Waiting for stdin while
+classification is pending, the virtual table for `records`, and a scrollable
+preformatted panel for `raw`. Raw pages load four chunks at a time and are
+accepted only at the current generation and sequential offset.
 
 ## Reactive rendering inside VirtualLogTable
 

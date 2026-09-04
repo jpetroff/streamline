@@ -16,6 +16,7 @@
   "session": {
     "sessionId": "session-1",
     "generationId": "1",
-    "inputStatus": "streaming"
+    "inputStatus": "streaming",
+    "inputKind": "records"
   }
 }

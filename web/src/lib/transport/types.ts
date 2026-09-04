@@ -2,6 +2,8 @@
 export type Decimal = string;
 /** Current state of the binary's input producer. */
 export type InputStatus = 'streaming' | 'eof' | 'error';
+/** Mutually exclusive stdin representation currently exposed by the binary. */
+export type InputKind = 'pending' | 'records' | 'raw';
 /** Lifecycle state of an immutable server-side query. */
 export type QueryStatus = 'building' | 'ready' | 'failed';
 /** Ordering applied by the query service; input order is the only current option. */
@@ -28,6 +30,7 @@ export interface Session {
   sessionId: string;
   generationId: string;
   inputStatus: InputStatus;
+  inputKind: InputKind;
   error?: APIErrorBody;
 }
 
@@ -68,6 +71,14 @@ export interface RowPage {
   snapshot: Snapshot;
   offset: Decimal;
   rows: LogRow[];
+}
+
+/** Bounded immutable page of display-safe raw stdin text chunks. */
+export interface RawChunkPage {
+  generationId: string;
+  offset: Decimal;
+  totalChunks: Decimal;
+  chunks: string[];
 }
 
 /** Latest-state notification; row payloads are intentionally excluded from SSE. */

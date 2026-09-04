@@ -21,6 +21,15 @@ const (
 	InputError     InputStatus = "error"
 )
 
+// InputKind identifies which mutually exclusive stdin representation is available.
+type InputKind string
+
+const (
+	InputPending InputKind = "pending"
+	InputRecords InputKind = "records"
+	InputRaw     InputKind = "raw"
+)
+
 type Status string
 
 const (
@@ -39,6 +48,7 @@ type Session struct {
 	SessionID    string      `json:"sessionId"`
 	GenerationID string      `json:"generationId"`
 	InputStatus  InputStatus `json:"inputStatus"`
+	InputKind    InputKind   `json:"inputKind"`
 	Error        *APIError   `json:"error,omitempty"`
 }
 
@@ -51,10 +61,12 @@ type APIError struct {
 func (e *APIError) Error() string { return e.Message }
 
 var (
-	ErrNotFound       = &APIError{Code: "query_not_found", Message: "query does not exist or has expired"}
-	ErrSnapshotGone   = &APIError{Code: "snapshot_invalid", Message: "snapshot is not available"}
-	ErrQueryEngine    = &APIError{Code: "query_engine_unavailable", Message: "filtering is not available until the query engine is connected"}
-	ErrInvalidRequest = &APIError{Code: "invalid_request", Message: "request is invalid"}
+	ErrNotFound          = &APIError{Code: "query_not_found", Message: "query does not exist or has expired"}
+	ErrSnapshotGone      = &APIError{Code: "snapshot_invalid", Message: "snapshot is not available"}
+	ErrQueryEngine       = &APIError{Code: "query_engine_unavailable", Message: "filtering is not available until the query engine is connected"}
+	ErrInvalidRequest    = &APIError{Code: "invalid_request", Message: "request is invalid"}
+	ErrRawUnavailable    = &APIError{Code: "raw_unavailable", Message: "raw stdin output is not available"}
+	ErrGenerationChanged = &APIError{Code: "generation_changed", Message: "the requested input generation is no longer current"}
 )
 
 // Record aliases the normalized log model consumed by query predicates.
@@ -99,6 +111,14 @@ type Page struct {
 	Rows     []Row    `json:"rows"`
 }
 
+// RawChunkPage is a bounded, immutable window over display-safe raw stdin text.
+type RawChunkPage struct {
+	GenerationID string   `json:"generationId"`
+	Offset       string   `json:"offset"`
+	TotalChunks  string   `json:"totalChunks"`
+	Chunks       []string `json:"chunks"`
+}
+
 type CreateRequest struct {
 	Filter string `json:"filter"`
 	Sort   Sort   `json:"sort"`
@@ -120,6 +140,7 @@ type Service interface {
 	Create(context.Context, CreateRequest) (State, error)
 	Get(context.Context, string) (State, error)
 	Page(context.Context, string, string, uint64, int) (Page, error)
+	Raw(context.Context, string, uint64, int) (RawChunkPage, error)
 	Subscribe(context.Context, string) (State, Session, Subscription, error)
 	Delete(context.Context, string) error
 }

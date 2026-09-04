@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -21,16 +22,16 @@ func TestLoadJournaldJSONAndOfficialFieldShapes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(result.Raw, input) {
+	if !bytes.Equal(result.Source, input) {
 		t.Fatal("raw input was not preserved")
 	}
-	if len(result.Records) != 2 {
-		t.Fatalf("record count = %d, want 2", len(result.Records))
+	if len(result.Parsed.Records) != 2 {
+		t.Fatalf("record count = %d, want 2", len(result.Parsed.Records))
 	}
 
-	first := result.Records[0]
+	first := result.Parsed.Records[0]
 	firstLineEnd := bytes.IndexByte(input, '\n') + 1
-	if first.RawStart != 0 || first.RawEnd != firstLineEnd || !bytes.Equal(result.Raw[first.RawStart:first.RawEnd], input[:firstLineEnd]) {
+	if first.RawStart != 0 || first.RawEnd != firstLineEnd || !bytes.Equal(result.Source[first.RawStart:first.RawEnd], input[:firstLineEnd]) {
 		t.Fatalf("first raw span = [%d:%d], want [0:%d]", first.RawStart, first.RawEnd, firstLineEnd)
 	}
 	if first.Entry.SourceFormat != logmodel.FormatJournaldJSON {
@@ -49,7 +50,7 @@ func TestLoadJournaldJSONAndOfficialFieldShapes(t *testing.T) {
 		t.Fatalf("null field = %#v, exists %v", value, exists)
 	}
 
-	second := result.Records[1].Entry
+	second := result.Parsed.Records[1].Entry
 	if second.Message != "hi!" {
 		t.Fatalf("binary message = %q", second.Message)
 	}
@@ -85,14 +86,14 @@ func TestLoadMixedJSONPlainTextAndTerminalTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Records) != 4 {
-		t.Fatalf("record count = %d, want 4", len(result.Records))
+	if len(result.Parsed.Records) != 4 {
+		t.Fatalf("record count = %d, want 4", len(result.Parsed.Records))
 	}
 	if len(result.Diagnostics) != 2 {
 		t.Fatalf("load diagnostics = %#v", result.Diagnostics)
 	}
 
-	jsonRecord := result.Records[0].Entry
+	jsonRecord := result.Parsed.Records[0].Entry
 	if jsonRecord.SourceFormat != logmodel.FormatJSON || jsonRecord.Message != "handled request" || jsonRecord.Severity != "info" {
 		t.Fatalf("generic record = %#v", jsonRecord)
 	}
@@ -106,7 +107,7 @@ func TestLoadMixedJSONPlainTextAndTerminalTranscript(t *testing.T) {
 		t.Fatalf("nested fields = %#v", jsonRecord.Fields)
 	}
 
-	plain := result.Records[1]
+	plain := result.Parsed.Records[1]
 	if plain.Entry.SourceFormat != logmodel.FormatText || plain.Entry.Message != "plain failure" {
 		t.Fatalf("plain record = %#v", plain.Entry)
 	}
@@ -116,16 +117,16 @@ func TestLoadMixedJSONPlainTextAndTerminalTranscript(t *testing.T) {
 	if !hasDiagnostic(plain.Entry.Diagnostics, "terminal_controls_removed") || !hasDiagnostic(plain.Entry.Diagnostics, "timestamp_context_assumed") {
 		t.Fatalf("plain diagnostics = %#v", plain.Entry.Diagnostics)
 	}
-	if result.Raw[plain.RawEnd-1] != '\r' {
-		t.Fatalf("plain raw span does not include lone CR: %q", result.Raw[plain.RawStart:plain.RawEnd])
+	if result.Source[plain.RawEnd-1] != '\r' {
+		t.Fatalf("plain raw span does not include lone CR: %q", result.Source[plain.RawStart:plain.RawEnd])
 	}
 
-	syslogRecord := result.Records[2].Entry
+	syslogRecord := result.Parsed.Records[2].Entry
 	if syslogRecord.Timestamp != "2026-12-31T20:59:59Z" || syslogRecord.Message != "host process: finished" {
 		t.Fatalf("syslog record = %#v", syslogRecord)
 	}
 
-	broken := result.Records[3].Entry
+	broken := result.Parsed.Records[3].Entry
 	if broken.SourceFormat != logmodel.FormatText || !hasDiagnostic(broken.Diagnostics, "malformed_json_fallback") || !hasDiagnostic(broken.Diagnostics, "terminal_truncated") {
 		t.Fatalf("truncated record = %#v", broken)
 	}
@@ -137,10 +138,10 @@ func TestTerminalControlsCanBeRemovedBeforeJSONRecognition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Records) != 1 {
-		t.Fatalf("record count = %d", len(result.Records))
+	if len(result.Parsed.Records) != 1 {
+		t.Fatalf("record count = %d", len(result.Parsed.Records))
 	}
-	record := result.Records[0].Entry
+	record := result.Parsed.Records[0].Entry
 	if record.SourceFormat != logmodel.FormatJournaldJSON || record.Message != "ok" {
 		t.Fatalf("record = %#v", record)
 	}
@@ -165,38 +166,38 @@ func TestTimestampContextAndJSONFallbacks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Records) != 4 {
-		t.Fatalf("record count = %d", len(result.Records))
+	if len(result.Parsed.Records) != 4 {
+		t.Fatalf("record count = %d", len(result.Parsed.Records))
 	}
-	if result.Records[0].Entry.Timestamp != "2026-07-02T08:04:05Z" || result.Records[0].Entry.Message != "no-zone" {
-		t.Fatalf("context timestamp = %#v", result.Records[0].Entry)
+	if result.Parsed.Records[0].Entry.Timestamp != "2026-07-02T08:04:05Z" || result.Parsed.Records[0].Entry.Message != "no-zone" {
+		t.Fatalf("context timestamp = %#v", result.Parsed.Records[0].Entry)
 	}
-	if result.Records[1].Entry.Message != "" || result.Records[1].Entry.Severity != "warn" || result.Records[1].Entry.Timestamp != "2026-07-02T08:04:05Z" {
-		t.Fatalf("JSON aliases = %#v", result.Records[1].Entry)
+	if result.Parsed.Records[1].Entry.Message != "" || result.Parsed.Records[1].Entry.Severity != "warn" || result.Parsed.Records[1].Entry.Timestamp != "2026-07-02T08:04:05Z" {
+		t.Fatalf("JSON aliases = %#v", result.Parsed.Records[1].Entry)
 	}
-	if !hasDiagnostic(result.Records[2].Entry.Diagnostics, "missing_message") {
-		t.Fatalf("missing-message fallback = %#v", result.Records[2].Entry)
+	if !hasDiagnostic(result.Parsed.Records[2].Entry.Diagnostics, "missing_message") {
+		t.Fatalf("missing-message fallback = %#v", result.Parsed.Records[2].Entry)
 	}
-	if !hasDiagnostic(result.Records[3].Entry.Diagnostics, "unsupported_json_root") {
-		t.Fatalf("array fallback = %#v", result.Records[3].Entry)
+	if !hasDiagnostic(result.Parsed.Records[3].Entry.Diagnostics, "unsupported_json_root") {
+		t.Fatalf("array fallback = %#v", result.Parsed.Records[3].Entry)
 	}
 }
 
 func TestInvalidUTF8LongLinesAndFinalPartialRecord(t *testing.T) {
 	long := strings.Repeat("x", 70*1024)
-	input := append([]byte(long+"\ninvalid-"), 0xff)
+	input := append([]byte("2026-09-04T12:00:00Z "+long+"\ninvalid-"), 0xff)
 	result, err := NewEngine(Options{}).Load(bytes.NewReader(input))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Records) != 2 || result.Records[0].Entry.Message != long {
-		t.Fatalf("long-line result sizes = records %d first length %d", len(result.Records), len(result.Records[0].Entry.Message))
+	if len(result.Parsed.Records) != 2 || result.Parsed.Records[0].Entry.Message != long {
+		t.Fatalf("long-line result sizes = records %d first length %d", len(result.Parsed.Records), len(result.Parsed.Records[0].Entry.Message))
 	}
-	if result.Records[1].RawEnd != len(input) || result.Records[1].Entry.Message != "invalid-�" {
-		t.Fatalf("final record = %#v", result.Records[1])
+	if result.Parsed.Records[1].RawEnd != len(input) || result.Parsed.Records[1].Entry.Message != "invalid-�" {
+		t.Fatalf("final record = %#v", result.Parsed.Records[1])
 	}
-	if !hasDiagnostic(result.Records[1].Entry.Diagnostics, "invalid_utf8_replaced") {
-		t.Fatalf("final diagnostics = %#v", result.Records[1].Entry.Diagnostics)
+	if !hasDiagnostic(result.Parsed.Records[1].Entry.Diagnostics, "invalid_utf8_replaced") {
+		t.Fatalf("final diagnostics = %#v", result.Parsed.Records[1].Entry.Diagnostics)
 	}
 }
 
@@ -214,17 +215,81 @@ func (reader *failingReader) Read(destination []byte) (int, error) {
 	return copy(destination, reader.data), reader.err
 }
 
-func TestReaderFailureReturnsParsedPartialResult(t *testing.T) {
+func TestReaderFailureReturnsRawPartialResult(t *testing.T) {
 	sourceError := errors.New("source failed")
 	result, err := NewEngine(Options{}).Load(&failingReader{data: []byte("partial"), err: sourceError})
 	if !errors.Is(err, sourceError) {
 		t.Fatalf("error = %v", err)
 	}
-	if len(result.Records) != 1 || result.Records[0].Entry.Message != "partial" {
+	if result.Kind != ResultRaw || result.Raw == nil || result.Raw.Text != "partial" || result.Parsed != nil {
 		t.Fatalf("partial result = %#v", result)
 	}
 	if len(result.Diagnostics) != 1 || result.Diagnostics[0].Diagnostic.Code != "input_read_error" {
 		t.Fatalf("load diagnostics = %#v", result.Diagnostics)
+	}
+}
+
+func TestLoadFallsBackToDisplaySafeRawText(t *testing.T) {
+	input := []byte("Report title\r\n\tvalue \x1b[31mred\x1b[0m\r")
+	result, err := NewEngine(Options{}).Load(bytes.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Kind != ResultRaw || result.Raw == nil || result.Parsed != nil {
+		t.Fatalf("result variant = %#v", result)
+	}
+	if result.Raw.Text != "Report title\n\tvalue red\n" {
+		t.Fatalf("raw text = %q", result.Raw.Text)
+	}
+	if !bytes.Equal(result.Source, input) {
+		t.Fatal("exact source was not retained")
+	}
+}
+
+func TestStreamBuffersPreambleThenEmitsRecognizedRecordsBeforeEOF(t *testing.T) {
+	reader, writer := io.Pipe()
+	emitted := make(chan []CapturedRecord, 2)
+	done := make(chan *LoadResult, 1)
+	go func() {
+		result, err := NewEngine(Options{}).Stream(reader, func(records []CapturedRecord) {
+			emitted <- records
+		})
+		if err != nil {
+			t.Errorf("stream error: %v", err)
+		}
+		done <- result
+	}()
+
+	if _, err := writer.Write([]byte("command preamble\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case records := <-emitted:
+		t.Fatalf("unrecognized preamble emitted early: %#v", records)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	if _, err := writer.Write([]byte("{\"message\":\"first\"}\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	first := <-emitted
+	if len(first) != 2 || first[0].Entry.Message != "command preamble" || first[1].Entry.Message != "first" {
+		t.Fatalf("first progressive batch = %#v", first)
+	}
+
+	if _, err := writer.Write([]byte("2026-09-04T12:00:00Z second\n")); err != nil {
+		t.Fatal(err)
+	}
+	second := <-emitted
+	if len(second) != 1 || second[0].Entry.Message != "second" {
+		t.Fatalf("second progressive batch = %#v", second)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	result := <-done
+	if result.Kind != ResultParsed || result.Parsed == nil || result.Raw != nil || len(result.Parsed.Records) != 3 {
+		t.Fatalf("final result = %#v", result)
 	}
 }
 
@@ -245,16 +310,16 @@ func TestJournaldMissingValuesAndInvalidSourceTimestampFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Records) != 2 {
-		t.Fatalf("record count = %d", len(result.Records))
+	if len(result.Parsed.Records) != 2 {
+		t.Fatalf("record count = %d", len(result.Parsed.Records))
 	}
-	nonText := result.Records[0].Entry
+	nonText := result.Parsed.Records[0].Entry
 	if nonText.Timestamp != "1970-01-01T00:00:01Z" ||
 		!hasDiagnostic(nonText.Diagnostics, "non_text_message") ||
 		!hasDiagnostic(nonText.Diagnostics, "invalid_timestamp") {
 		t.Fatalf("non-text journal record = %#v", nonText)
 	}
-	missing := result.Records[1].Entry
+	missing := result.Parsed.Records[1].Entry
 	if missing.Message == "" || !hasDiagnostic(missing.Diagnostics, "missing_message") {
 		t.Fatalf("missing-message journal record = %#v", missing)
 	}
@@ -274,10 +339,10 @@ func TestSuppliedReferenceDatasetsWhenAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plainResult.Records) != 10 {
-		t.Fatalf("plain journal record count = %d, want 10", len(plainResult.Records))
+	if len(plainResult.Parsed.Records) != 10 {
+		t.Fatalf("plain journal record count = %d, want 10", len(plainResult.Parsed.Records))
 	}
-	for _, record := range plainResult.Records {
+	for _, record := range plainResult.Parsed.Records {
 		if record.Entry.SourceFormat != logmodel.FormatJournaldJSON {
 			t.Fatalf("plain journal format = %q", record.Entry.SourceFormat)
 		}
@@ -292,14 +357,12 @@ func TestSuppliedReferenceDatasetsWhenAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(terminalResult.Records) == 0 || len(terminalResult.Diagnostics) == 0 {
-		t.Fatalf("terminal result did not retain records and report skipped chrome: %#v", terminalResult)
+	if terminalResult.Kind != ResultRaw || terminalResult.Raw == nil || len(terminalResult.Diagnostics) == 0 {
+		t.Fatalf("terminal result did not fall back to raw and report skipped chrome: %#v", terminalResult)
 	}
-	for _, record := range terminalResult.Records {
-		for _, character := range record.Entry.Message {
-			if character == '\x1b' || character == '\x7f' || (character >= 0x80 && character <= 0x9f) {
-				t.Fatalf("unsafe terminal control remained in %q", record.Entry.Message)
-			}
+	for _, character := range terminalResult.Raw.Text {
+		if character == '\x1b' || character == '\x7f' || (character >= 0x80 && character <= 0x9f) {
+			t.Fatalf("unsafe terminal control remained in %q", terminalResult.Raw.Text)
 		}
 	}
 }

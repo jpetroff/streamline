@@ -66,8 +66,8 @@ flowchart LR
   end
 ```
 
-The dark shell initially shows an empty virtual log table until runtime input
-is connected. Check connectivity at
+The dark shell initially waits for stdin. Recognized logs appear in the virtual
+table; terminal unrecognized input appears in the raw view after EOF. Check connectivity at
 [development health](http://localhost:5173/api/v1/health) or
 [standalone health](http://localhost:8080/api/v1/health).
 
@@ -131,8 +131,8 @@ only contains the shadcn configuration, theme, utility, and dependencies.
 
 ## Smoke checks
 
-After `make check`, verify the dark shell, empty virtual table, and health
-endpoint through Vite.
+After `make check`, verify the stdin selector, waiting state, parsed table, raw
+view, and health endpoint through Vite.
 Stop development, run `make build`, and launch `bin/streamline` from another
 working directory to check that assets are embedded. Verify unknown API paths
 return 404 and Ctrl+C releases both development ports.

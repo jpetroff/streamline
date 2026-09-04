@@ -14,6 +14,11 @@ import (
 	"streamline/internal/query"
 )
 
+const (
+	defaultRawChunkLimit = 4
+	maxRawChunkLimit     = 16
+)
+
 type handler struct{ queries query.Service }
 
 // NewHandler wires the versioned transport routes to an injected query service and frontend.
@@ -33,6 +38,7 @@ func NewHandler(frontend http.Handler, services ...query.Service) http.Handler {
 		}{Status: "ok"})
 	})
 	mux.HandleFunc("GET /api/v1/session", h.session)
+	mux.HandleFunc("GET /api/v1/input/raw", h.rawInput)
 	mux.HandleFunc("POST /api/v1/queries", h.createQuery)
 	mux.HandleFunc("GET /api/v1/queries/{id}", h.getQuery)
 	mux.HandleFunc("DELETE /api/v1/queries/{id}", h.deleteQuery)
@@ -47,6 +53,31 @@ func NewHandler(frontend http.Handler, services ...query.Service) http.Handler {
 // session returns the identity and input status used to validate query snapshots.
 func (h handler) session(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.queries.Session(r.Context()))
+}
+
+// rawInput returns a bounded chunk window for terminal unrecognized stdin.
+func (h handler) rawInput(w http.ResponseWriter, r *http.Request) {
+	generation := r.URL.Query().Get("generation")
+	if generation == "" {
+		writeError(w, http.StatusBadRequest, &query.APIError{Code: "generation_required", Message: "generation is required"})
+		return
+	}
+	offset, err := parseUint(r.URL.Query().Get("offset"), 0)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, &query.APIError{Code: "invalid_offset", Message: "offset must be a non-negative integer"})
+		return
+	}
+	limit64, err := parseUint(r.URL.Query().Get("limit"), defaultRawChunkLimit)
+	if err != nil || limit64 == 0 || limit64 > maxRawChunkLimit {
+		writeError(w, http.StatusBadRequest, &query.APIError{Code: "invalid_limit", Message: "limit must be between 1 and 16"})
+		return
+	}
+	page, err := h.queries.Raw(r.Context(), generation, offset, int(limit64))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
 }
 
 // createQuery validates a query command and starts its asynchronous initial scan.
@@ -192,6 +223,8 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		status = http.StatusNotFound
 	case query.ErrQueryEngine.Code:
 		status = http.StatusNotImplemented
+	case query.ErrRawUnavailable.Code, query.ErrGenerationChanged.Code:
+		status = http.StatusConflict
 	case "internal_error":
 		status = http.StatusInternalServerError
 	}

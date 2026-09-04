@@ -4,18 +4,21 @@
 
 | Area | Responsibility |
 | --- | --- |
-| `cmd/streamline` | CLI port, loopback listener, graceful shutdown |
-| `internal/httpapi` | Versioned session/query JSON endpoints, bounded row pages, SSE state notifications, and health |
+| `cmd/streamline` | CLI port, loopback listener, background stdin startup, graceful shutdown |
+| `internal/httpapi` | Versioned session/query JSON endpoints, bounded row/raw pages, SSE state notifications, and health |
 | `internal/query` | In-memory query lifecycle, immutable snapshot boundaries, live result indexes, subscriptions, and compiler boundary |
 | `internal/logmodel` | Universal typed log records, source formats, parser diagnostics, and deep cloning |
-| `internal/parse` | In-memory capture, terminal sanitization, per-record detection, and journald/JSON/text normalization |
+| `internal/ingest` | Progressive stdin coordination, commit batching, EOF/error publication |
+| `internal/parse` | Streaming framing, terminal sanitization, stream classification, and journald/JSON/text normalization |
 | `internal/webassets` | Embedded frontend in release builds; development build excludes assets |
 | `web` | Svelte 5 viewer controller, HTTP/SSE client, 32 MB page cache, dark application shell, and segmented virtual log table |
 | UI foundations | shadcn-svelte configuration, Bits UI, dark neutral theme, class utility, and Lucide icons |
 | Installed for later | ECharts |
 
 The server uses Go's standard library and builds with CGo disabled.
-The parser engine is implemented but is not wired to runtime input. No stdin ingestion, shared filter-expression compiler, profiles, or graphs are implemented. The production service currently accepts the unfiltered input-order query; ingestion will call its batch append hook and the query engine will provide the compiler.
+Stdin ingestion is implemented. No shared filter-expression compiler, profiles,
+or graphs are implemented. The production service currently accepts the
+unfiltered input-order query.
 See [parser flow and revisitable decisions](parser.md) for the implemented
 normalization boundary.
 
@@ -27,7 +30,8 @@ rows.
 
 | Route | Contract |
 | --- | --- |
-| `GET /session` | Session/generation identity and `streaming`, `eof`, or `error` input state |
+| `GET /session` | Session/generation identity, input status, and pending/records/raw kind |
+| `GET /input/raw` | Read generation-guarded display-safe raw stdin chunks |
 | `POST /queries` | Create an immutable filter/sort query; returns `202` with `building` or `ready` state |
 | `GET /queries/{id}` | Resynchronize authoritative progress and latest snapshot |
 | `GET /queries/{id}/rows` | Read `offset`/`limit` rows from an opaque `snapshot` token; default 200, maximum 1,000 |
@@ -57,11 +61,11 @@ a partial tail is refetched. A missing paused snapshot becomes an explicit
 refresh state.
 
 `query.Compiler` is the integration boundary for the future shared filter
-expression tree. `MemoryService.Append` and `SetInputStatus` are the ingestion integration
-hooks. A future profile service emits generation events through the query-service
+expression tree. `MemoryService.Append`, `SetInputStatus`, and `SetRawOutput`
+are the ingestion integration hooks. A future profile service emits generation events through the query-service
 contract; the following frontend then builds an atomic replacement query.
 
-## Planned first version
+## Current stdin path and planned first version
 
 One stdin stream comes from the user's shell, including SSH + tail, journalctl,
 or Docker. The full session stays in memory until exit. Memory may grow; there
@@ -106,8 +110,8 @@ flowchart LR
 - Pausing the view or disconnecting the browser does not stop capture. EOF
   flushes pending records and leaves the viewer running.
 
-Planned Go packages are `ingest`, `parse`, `profile`, `storage/memory`, and
-`query` under `internal/`. Add them as their behavior is implemented.
+`ingest`, `parse`, and `query` now live under `internal/`; profile and
+persistent storage packages remain future work.
 
 ## Later: storage middleware
 

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { EventConnection, QueryAPI } from '../src/lib/transport/api';
 import { ViewerController } from '../src/lib/transport/viewer-controller';
-import type { QuerySort, QueryState, RowPage, Session, Snapshot } from '../src/lib/transport/types';
+import type { QueryEvent, QuerySort, QueryState, RawChunkPage, RowPage, Session, Snapshot } from '../src/lib/transport/types';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -19,7 +19,7 @@ function ready(queryId: string, matchedCount = '1', revision = '1'): QueryState 
 class FakeAPI implements QueryAPI {
   creates = new Map<string, ReturnType<typeof deferred<QueryState>>>();
   deleted: string[] = [];
-  session(): Promise<Session> { return Promise.resolve({ sessionId: 'session', generationId: '1', inputStatus: 'streaming' }); }
+  session(): Promise<Session> { return Promise.resolve({ sessionId: 'session', generationId: '1', inputStatus: 'streaming', inputKind: 'records' }); }
   create(filter: string, _sort: QuerySort): Promise<QueryState> {
     const request = deferred<QueryState>();
     this.creates.set(filter, request);
@@ -29,6 +29,7 @@ class FakeAPI implements QueryAPI {
   rows(queryId: string, _snapshot: string, offset: bigint): Promise<RowPage> {
     return Promise.resolve({ snapshot: ready(queryId).snapshot!, offset: offset.toString(), rows: [{ id: '1', message: queryId, sourceFormat: 'text' }] });
   }
+  raw(): Promise<RawChunkPage> { throw new Error('raw output was not expected'); }
   events(): EventConnection { return { close() {} }; }
   delete(queryId: string): Promise<void> { this.deleted.push(queryId); return Promise.resolve(); }
 }
@@ -39,9 +40,10 @@ class RangeAPI implements QueryAPI {
   deferredRows = false;
   pending = new Map<bigint, ReturnType<typeof deferred<RowPage>>>();
 
-  session(): Promise<Session> { return Promise.resolve({ sessionId: 'session', generationId: '1', inputStatus: 'streaming' }); }
+  session(): Promise<Session> { return Promise.resolve({ sessionId: 'session', generationId: '1', inputStatus: 'streaming', inputKind: 'records' }); }
   create(): Promise<QueryState> { return Promise.resolve(this.state); }
   get(): Promise<QueryState> { return Promise.resolve(this.state); }
+  raw(): Promise<RawChunkPage> { throw new Error('raw output was not expected'); }
   events(): EventConnection { return { close() {} }; }
   delete(): Promise<void> { return Promise.resolve(); }
 
@@ -158,5 +160,70 @@ test('a late viewport response cannot replace a newer visible range', async () =
   api.resolve([0n, 200n]);
   await older;
   expect(controller.state.displayed?.pages.map(page => page.offset)).toEqual(['400', '600', '800']);
+  controller.dispose();
+});
+
+
+class StartupAPI implements QueryAPI {
+  readonly state = ready('startup-query', '0');
+  readonly deleted: string[] = [];
+  readonly rawCalls: bigint[] = [];
+  created = 0;
+  onEvent?: (event: QueryEvent) => void;
+
+  constructor(public sessionState: Session, private rawChunks: string[] = []) {}
+
+  session(): Promise<Session> { return Promise.resolve(this.sessionState); }
+  create(): Promise<QueryState> { this.created++; return Promise.resolve(this.state); }
+  get(): Promise<QueryState> { return Promise.resolve(this.state); }
+  rows(): Promise<RowPage> { throw new Error('row output was not expected'); }
+  raw(generationId: string, offset: bigint, limit: number): Promise<RawChunkPage> {
+    this.rawCalls.push(offset);
+    return Promise.resolve({
+      generationId,
+      offset: offset.toString(),
+      totalChunks: this.rawChunks.length.toString(),
+      chunks: this.rawChunks.slice(Number(offset), Number(offset) + limit),
+    });
+  }
+  events(_queryId: string, onEvent: (event: QueryEvent) => void): EventConnection {
+    this.onEvent = onEvent;
+    return { close() {} };
+  }
+  delete(queryId: string): Promise<void> { this.deleted.push(queryId); return Promise.resolve(); }
+
+  emitRaw() {
+    this.sessionState = { ...this.sessionState, inputKind: 'raw', inputStatus: 'eof' };
+    this.onEvent?.({ type: 'input', state: this.state, session: this.sessionState });
+  }
+}
+
+test('startup routes terminal raw stdin directly to bounded chunk loading', async () => {
+  const api = new StartupAPI(
+    { sessionId: 'session', generationId: '1', inputStatus: 'eof', inputKind: 'raw' },
+    ['one', 'two', 'three', 'four', 'five'],
+  );
+  const controller = new ViewerController(api);
+  await controller.start();
+  expect(api.created).toBe(0);
+  expect(api.rawCalls).toEqual([0n]);
+  expect(controller.state.raw?.chunks).toEqual(['one', 'two', 'three', 'four']);
+  await controller.loadMoreRaw();
+  expect(api.rawCalls).toEqual([0n, 4n]);
+  expect(controller.state.raw?.chunks.join('')).toBe('onetwothreefourfive');
+  controller.dispose();
+});
+
+test('an input event atomically releases an empty parsed query for raw mode', async () => {
+  const api = new StartupAPI({ sessionId: 'session', generationId: '1', inputStatus: 'streaming', inputKind: 'pending' }, ['report']);
+  const controller = new ViewerController(api);
+  await controller.start();
+  expect(controller.state.displayed?.queryId).toBe('startup-query');
+
+  api.emitRaw();
+  await settle();
+  expect(api.deleted).toContain('startup-query');
+  expect(controller.state.displayed).toBeUndefined();
+  expect(controller.state.raw?.chunks).toEqual(['report']);
   controller.dispose();
 });

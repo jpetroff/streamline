@@ -1,35 +1,31 @@
 # Parser engine
 
-Status: implemented and tested; not connected to runtime stdin or file input.
+Status: implemented, tested, and connected to progressive runtime stdin ingestion.
 
 ## Flow
 
-`parse.NewEngine(Options).Load(io.Reader)` reads the available input into one
-`LoadResult`. The original bytes are stored once; normalized records point back
-to them with exclusive `RawStart` and `RawEnd` offsets.
+`parse.NewEngine(Options).Stream(io.Reader, callback)` frames input as it arrives
+and emits records after the first recognizable log. `Load` is the whole-input
+wrapper. `LoadResult` retains exact source bytes and contains exactly one of a
+parsed-record result or display-safe raw text; parsed records refer to the source
+with exclusive `RawStart` and `RawEnd` offsets.
 
 ```mermaid
 flowchart LR
-  input[/io.Reader/] --> load["Read all available bytes"]
-  load --> raw[(LoadResult.Raw)]
-  load --> frame["Frame on LF, CRLF, or CR"]
+  input[/"streaming io.Reader"/] --> frame["Frame on LF, CRLF, or CR"]
   frame --> clean["Remove terminal controls"]
-  clean --> skip{"Empty or pager chrome?"}
-  skip -->|"Yes"| loadWarning["Load diagnostic"]
-  skip -->|"No"| detect{"JSON object?"}
-  detect -->|"Journal markers"| journal["Normalize journald JSON"]
-  detect -->|"Other object"| json["Normalize generic JSON"]
-  detect -->|"No"| text["Normalize timestamped text"]
-  journal --> captured["CapturedRecord"]
-  json --> captured
-  text --> captured
-  raw --> spans["Raw byte spans"]
-  spans --> captured
+  clean --> detect{"Recognizable log?"}
+  detect -->|"JSON object or timestamped text"| parsed["Parsed stream"]
+  detect -->|"Not yet"| buffer["Buffer preamble"]
+  buffer --> detect
+  parsed --> append["Emit committed record batches"]
+  detect -->|"EOF with no match"| raw["Display-safe raw text"]
 ```
 
-Detection is per record, so terminal noise or one malformed line does not lock
-the rest of the input to the wrong parser. JSON-looking data that fails decoding
-is retained as text with a diagnostic.
+Classification is stream-wide and irreversible. A valid journald/generic JSON
+object or timestamped text selects parsed mode; preceding and later visible lines
+remain ordinary text records. If no record recognizes the stream before EOF or
+a read error, the complete source becomes sanitized raw text instead.
 
 ## Normalized record
 
@@ -44,37 +40,40 @@ is retained as text with a diagnostic.
 | `sourceFormat` | `journald-json`, `json`, or `text` |
 | `diagnostics` | Stable codes for non-fatal cleanup or fallback decisions |
 
-Journald uses `MESSAGE`, maps `PRIORITY`, and prefers
-`_SOURCE_REALTIME_TIMESTAMP` over `__REALTIME_TIMESTAMP`. Generic JSON uses
-the documented aliases in `normalizeJSON`. Nested JSON or logfmt inside a
-message is intentionally not parsed again.
+Journald recognition requires `__REALTIME_TIMESTAMP` plus a cursor,
+monotonic timestamp, or boot ID. It uses `MESSAGE`, maps `PRIORITY`, and
+prefers `_SOURCE_REALTIME_TIMESTAMP` over `__REALTIME_TIMESTAMP`. Generic
+JSON checks `message/msg/log`, `severity/level/lvl/priority`, and
+`timestamp/time/ts/@timestamp`. Plain text recognizes RFC3339,
+`YYYY-MM-DD HH:mm:ss`, and syslog month/day timestamps. Nested JSON or logfmt
+inside a message is intentionally not parsed again.
 
 ```mermaid
 flowchart LR
-  capture["Engine.Load"] --> raw[(Exact raw bytes)]
+  capture["Engine.Stream / Load"] --> raw[("Exact raw bytes")]
   capture --> entry["Normalized logmodel.Record"]
   raw --> offsets["CapturedRecord offsets"]
   offsets --> entry
-  entry -.->|"Future ingestion wiring"| append["MemoryService.Append copy"]
-  append --> stored[(Query records)]
+  entry -->|"512 records / 100 ms"| append["MemoryService.Append copy"]
+  append --> stored[("Query records")]
   stored --> page["Page result copy"]
   page --> wire["Frontend LogRow"]
-  raw -.->|"Never serialized"| internal["Internal replay and diagnostics"]
+  raw -->|"Bounded 64 KiB chunks after EOF"| browser["Raw frontend panel"]
 ```
 
 ## Decision ledger
 
 | Revisitable decision | Implemented in | Revisit when |
 | --- | --- | --- |
-| Read the source fully into memory and retain exact bytes | `Engine.Load`, `LoadResult` in [engine.go](../internal/parse/engine.go) | Streaming capture, input limits, or disk spill are introduced |
-| Treat LF, CRLF, lone CR, and a final unterminated line as record boundaries | `splitFrames` in [engine.go](../internal/parse/engine.go) | Multiline records or terminal screen replay are added |
+| Stream complete frames while retaining exact source bytes | `Engine.Stream`, `LoadResult` in [engine.go](../internal/parse/engine.go) | Input limits, disk spill, or raw replay are introduced |
+| Treat LF, CRLF, lone CR, and a final unterminated line as record boundaries | `Engine.Stream` framing in [engine.go](../internal/parse/engine.go) | Multiline records or terminal screen replay are added |
 | Strip ANSI/ECMA-48 and unsafe C0/C1 controls with a state machine | `sanitizeBytes` in [sanitize.go](../internal/parse/sanitize.go) | Styled output should be preserved or more terminal protocols are supported |
 | Drop only styled `less` filler/status lines; retain uncertain content | `isPagerArtifact`, `hasLessTruncation` in [sanitize.go](../internal/parse/sanitize.go) | Other pagers need explicit artifact rules |
-| Detect each record as journald JSON, generic JSON, then text | `parseRecord`, `looksLikeJournald` in [normalize.go](../internal/parse/normalize.go) | A parser registry, confidence scoring, or more formats are added |
+| Select parsed mode on the first JSON object or timestamped text record | `Engine.Stream`, `parseRecord` | A parser registry, confidence scoring, or more formats are added |
 | Preserve structured JSON types with `json.Number` in Go | `decodeJSON`, `cleanJSONValue` in [normalize.go](../internal/parse/normalize.go) | Exact numeric spelling must cross the browser boundary |
 | Prefer source time, fall back to journal receipt time, and map syslog priority | `normalizeJournald` in [normalize.go](../internal/parse/normalize.go) | Receipt-time ordering or all eight syslog levels are required |
 | Use configurable timezone/reference context for incomplete text timestamps | `parseLeadingTimestamp` in [timestamp.go](../internal/parse/timestamp.go) | Input-specific timezone/year controls are exposed |
-| Keep raw bytes internal while exposing format and diagnostics on rows | [model.go](../internal/logmodel/model.go), [types.ts](../web/src/lib/transport/types.ts) | A raw-record detail endpoint is designed |
+| Expose terminal unrecognized input only as display-safe bounded chunks | `RawResult`, `GET /api/v1/input/raw` | Exact-byte download or raw-record details are designed |
 | Deep-copy nested fields at query append and page boundaries | `CloneRecord` in [model.go](../internal/logmodel/model.go), `Append` and `Page` in [memory.go](../internal/query/memory.go) | Records become immutable value objects or storage ownership changes |
 
 Common diagnostic codes are
@@ -86,8 +85,8 @@ Common diagnostic codes are
 
 ## Boundaries and verification
 
-- No call from `cmd/streamline` to the parser exists yet. Future ingestion
-  should convert `CapturedRecord.Entry` values into complete append batches.
+- `cmd/streamline` starts `internal/ingest` in the background. It coalesces
+  parsed entries into batches of 512 records or 100 ms before append.
 - Pretty/multiline JSON, journal export format, stack-trace grouping, and nested
   message parsing are out of scope.
 - [engine_test.go](../internal/parse/engine_test.go) covers the committed fixture,

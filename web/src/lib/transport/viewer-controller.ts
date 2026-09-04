@@ -1,7 +1,7 @@
 import { pageOffsetsForRange, PAGE_SIZE } from '$lib/virtual-window';
 import { HTTPQueryAPI, TransportError, type EventConnection, type QueryAPI } from './api';
 import { PageCache } from './page-cache';
-import type { APIErrorBody, QueryEvent, QuerySort, QueryState, RowPage, Snapshot } from './types';
+import type { APIErrorBody, QueryEvent, QuerySort, QueryState, RowPage, Session, Snapshot } from './types';
 import { reduceViewer, type ViewerState } from './viewer-state';
 
 /** Coordinates query lifecycle, SSE notifications, guarded page loading, and follow state. */
@@ -13,6 +13,7 @@ export class ViewerController {
   private activeEvents?: EventConnection;
   private pendingEvents?: EventConnection;
   private activeRange?: { key: string; promise: Promise<void> };
+  private rawLoad?: Promise<void>;
   private lastLoadedRangeKey?: string;
   private cache = new PageCache();
   private inflightPages = new Map<string, Promise<RowPage | undefined>>();
@@ -30,11 +31,31 @@ export class ViewerController {
     return () => this.listeners.delete(listener);
   }
 
+  /** Reads session input state and starts either the parsed query or raw-output path. */
+  async start() {
+    const intent = ++this.intent;
+    this.abort?.abort();
+    this.abort = new AbortController();
+    try {
+      const session = await this.api.session(this.abort.signal);
+      if (!this.current(intent)) return;
+      this.dispatch({ type: 'session', session });
+      if (session.inputKind === 'raw') {
+        await this.activateRaw(session);
+      } else {
+        await this.setQuery('');
+      }
+    } catch (error) {
+      if (this.current(intent) && !isAbort(error)) this.dispatch({ type: 'failed', error: errorBody(error) });
+    }
+  }
+
   /** Builds a replacement query while preserving the current display until its first page is ready. */
   async setQuery(filter: string, sort: QuerySort = 'input') {
     const intent = ++this.intent;
     this.rangeRequest++;
     this.activeRange = undefined;
+    this.rawLoad = undefined;
     this.lastLoadedRangeKey = undefined;
     this.inflightPages.clear();
     this.abort?.abort();
@@ -96,6 +117,33 @@ export class ViewerController {
     return promise;
   }
 
+  /** Loads the next sequential raw stdin page, deduplicating concurrent requests. */
+  async loadMoreRaw() {
+    const raw = this.state.raw;
+    if (!raw || raw.loading) return;
+    if (raw.totalChunks !== undefined && BigInt(raw.nextOffset) >= BigInt(raw.totalChunks)) return;
+    if (this.rawLoad) return this.rawLoad;
+    const intent = this.intent;
+    const generationId = raw.generationId;
+    const offset = BigInt(raw.nextOffset);
+    this.dispatch({ type: 'rawLoading', generationId });
+    let pending!: Promise<void>;
+    pending = (async () => {
+      try {
+        const page = await this.api.raw(generationId, offset, 4, this.abort?.signal);
+        if (!this.current(intent) || this.state.session?.inputKind !== 'raw') return;
+        if (page.generationId !== generationId || page.offset !== offset.toString()) return;
+        this.dispatch({ type: 'rawPage', page });
+      } catch (error) {
+        if (this.current(intent) && !isAbort(error)) this.dispatch({ type: 'failed', error: errorBody(error) });
+      } finally {
+        if (this.rawLoad === pending) this.rawLoad = undefined;
+      }
+    })();
+    this.rawLoad = pending;
+    return pending;
+  }
+
   /** Pins the currently displayed snapshot while ingestion and query evaluation continue. */
   pause() {
     if (this.state.following) this.dispatch({ type: 'pause' });
@@ -131,6 +179,7 @@ export class ViewerController {
     this.abort?.abort();
     this.activeEvents?.close();
     this.pendingEvents?.close();
+    this.rawLoad = undefined;
     const ids = new Set([this.state.displayed?.queryId, this.state.pending?.queryId].filter(Boolean) as string[]);
     for (const id of ids) void this.api.delete(id);
     this.listeners.clear();
@@ -142,10 +191,39 @@ export class ViewerController {
   private async receive(intent: number, filter: string, sort: QuerySort, event: QueryEvent) {
     if (!this.current(intent)) return;
     this.dispatch({ type: 'session', session: event.session });
+    if (event.session.inputKind === 'raw') {
+      await this.activateRaw(event.session);
+      return;
+    }
     const snapshotGeneration = event.state.snapshot?.generationId;
     if (event.type === 'generation' || (snapshotGeneration && snapshotGeneration !== event.session.generationId)) { void this.setQuery(filter, sort); return; }
     try { await this.acceptState(intent, filter, sort, event.state); }
     catch (error) { if (!isAbort(error)) void this.resync(intent, filter, sort, event.state.queryId); }
+  }
+
+  /** Leaves query mode and begins guarded sequential raw-output paging. */
+  private async activateRaw(session: Session) {
+    if (this.state.raw?.generationId === session.generationId) {
+      await this.loadMoreRaw();
+      return;
+    }
+    ++this.intent;
+    this.rangeRequest++;
+    this.abort?.abort();
+    this.abort = new AbortController();
+    this.activeEvents?.close();
+    this.pendingEvents?.close();
+    this.activeEvents = undefined;
+    this.pendingEvents = undefined;
+    this.activeRange = undefined;
+    this.rawLoad = undefined;
+    const ids = new Set([this.state.displayed?.queryId, this.state.pending?.queryId].filter(Boolean) as string[]);
+    this.dispatch({ type: 'rawStart', generationId: session.generationId });
+    this.inflightPages.clear();
+    this.cache.clear();
+    this.requestedRevision.clear();
+    for (const id of ids) void this.api.delete(id);
+    await this.loadMoreRaw();
   }
 
   /** Converts authoritative query state into guarded page fetches and atomic viewer transitions. */

@@ -154,12 +154,6 @@
 </script>
 
 <section class="flex h-full min-h-0 flex-col bg-background" aria-label="Log output">
-  {#if viewer.error}
-    <div class="border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
-      {viewer.error.message}
-    </div>
-  {/if}
-
   <div class="flex min-h-0 flex-1 flex-col" role="table" aria-label="Log records" aria-busy={viewer.pending !== undefined}>
     <div class="grid h-9 shrink-0 grid-cols-[12rem_7rem_minmax(0,1fr)] items-center border-b bg-table-header px-3 font-mono text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground" role="rowgroup">
       <div role="row" class="contents">
