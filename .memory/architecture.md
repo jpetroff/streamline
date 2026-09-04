@@ -7,13 +7,17 @@
 | `cmd/streamline` | CLI port, loopback listener, graceful shutdown |
 | `internal/httpapi` | Versioned session/query JSON endpoints, bounded row pages, SSE state notifications, and health |
 | `internal/query` | In-memory query lifecycle, immutable snapshot boundaries, live result indexes, subscriptions, and compiler boundary |
+| `internal/logmodel` | Universal typed log records, source formats, parser diagnostics, and deep cloning |
+| `internal/parse` | In-memory capture, terminal sanitization, per-record detection, and journald/JSON/text normalization |
 | `internal/webassets` | Embedded frontend in release builds; development build excludes assets |
 | `web` | Svelte 5 viewer controller, HTTP/SSE client, 32 MB page cache, filter/follow/pagination shell |
 | UI foundations | shadcn-svelte configuration, Bits UI, neutral theme, class utility |
 | Installed for later | TanStack Svelte Virtual and ECharts |
 
 The server uses Go's standard library and builds with CGo disabled.
-No stdin ingestion, parser, shared filter-expression compiler, profiles, or graphs are implemented. The production service currently accepts the unfiltered input-order query; ingestion will call its batch append hook and the query engine will provide the compiler.
+The parser engine is implemented but is not wired to runtime input. No stdin ingestion, shared filter-expression compiler, profiles, or graphs are implemented. The production service currently accepts the unfiltered input-order query; ingestion will call its batch append hook and the query engine will provide the compiler.
+See [parser flow and revisitable decisions](parser.md) for the implemented
+normalization boundary.
 
 ## Implemented binary–frontend protocol
 

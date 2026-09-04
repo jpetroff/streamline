@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"streamline/internal/logmodel"
 	"streamline/internal/query"
 )
 
@@ -41,7 +42,11 @@ func waitReady(t *testing.T, client *http.Client, url string) query.State {
 
 func TestQueryHTTPContractAndStableSnapshotPage(t *testing.T) {
 	service := query.NewMemoryService(nil)
-	service.Append([]query.Record{{Message: "first"}, {Message: "second"}})
+	service.Append([]query.Record{{
+		Message: "first", SourceFormat: logmodel.FormatJSON,
+		Fields:      map[string]any{"nested": map[string]any{"ok": true}, "values": []any{"one", json.Number("2")}},
+		Diagnostics: []logmodel.Diagnostic{{Code: "normalized", Message: "normalized"}},
+	}, {Message: "second"}})
 	server := httptest.NewServer(NewHandler(http.NotFoundHandler(), service))
 	t.Cleanup(server.Close)
 
@@ -72,6 +77,13 @@ func TestQueryHTTPContractAndStableSnapshotPage(t *testing.T) {
 	pageResponse.Body.Close()
 	if len(page.Rows) != 1 || page.Rows[0].ID != "1" || page.Snapshot.Revision != ready.Snapshot.Revision {
 		t.Fatalf("unexpected page: %#v", page)
+	}
+
+	row := page.Rows[0]
+	if row.SourceFormat != logmodel.FormatJSON ||
+		row.Fields["nested"].(map[string]any)["ok"] != true ||
+		row.Diagnostics[0].Code != "normalized" {
+		t.Fatalf("structured row contract = %#v", row)
 	}
 
 	invalid, err := server.Client().Get(server.URL + "/api/v1/queries/" + created.QueryID + "/rows?snapshot=missing")

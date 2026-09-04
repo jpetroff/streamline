@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"streamline/internal/logmodel"
 )
 
 type blockingCompiler struct{ entered, release chan struct{} }
@@ -153,5 +155,48 @@ func TestDisconnectedQueryExpiresAfterGracePeriod(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 	if _, err := service.Get(context.Background(), created.QueryID); err != ErrNotFound {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestAppendAndPageOwnNestedRecordData(t *testing.T) {
+	service := NewMemoryService(nil)
+	input := []Record{{
+		Message:      "structured",
+		SourceFormat: logmodel.FormatJSON,
+		Fields: map[string]any{
+			"nested": map[string]any{"items": []any{"original"}},
+		},
+		Diagnostics: []logmodel.Diagnostic{{Code: "original", Message: "original"}},
+	}}
+	service.Append(input)
+
+	input[0].Fields["nested"].(map[string]any)["items"].([]any)[0] = "caller mutation"
+	input[0].Diagnostics[0].Code = "caller mutation"
+
+	created, err := service.Create(context.Background(), CreateRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := readyState(t, service, created.QueryID).Snapshot
+	page, err := service.Page(context.Background(), created.QueryID, snapshot.SnapshotToken, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := page.Rows[0]
+	if row.SourceFormat != logmodel.FormatJSON ||
+		row.Fields["nested"].(map[string]any)["items"].([]any)[0] != "original" ||
+		row.Diagnostics[0].Code != "original" {
+		t.Fatalf("stored row changed through append input: %#v", row)
+	}
+
+	row.Fields["nested"].(map[string]any)["items"].([]any)[0] = "page mutation"
+	row.Diagnostics[0].Code = "page mutation"
+	again, err := service.Page(context.Background(), created.QueryID, snapshot.SnapshotToken, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Rows[0].Fields["nested"].(map[string]any)["items"].([]any)[0] != "original" ||
+		again.Rows[0].Diagnostics[0].Code != "original" {
+		t.Fatalf("stored row changed through returned page: %#v", again.Rows[0])
 	}
 }

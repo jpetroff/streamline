@@ -4,6 +4,8 @@ package query
 import (
 	"context"
 	"errors"
+
+	"streamline/internal/logmodel"
 )
 
 const (
@@ -55,20 +57,17 @@ var (
 	ErrInvalidRequest = &APIError{Code: "invalid_request", Message: "request is invalid"}
 )
 
-type Record struct {
-	ID        uint64            `json:"-"`
-	Timestamp string            `json:"timestamp,omitempty"`
-	Severity  string            `json:"severity,omitempty"`
-	Message   string            `json:"message"`
-	Fields    map[string]string `json:"fields,omitempty"`
-}
+// Record aliases the normalized log model consumed by query predicates.
+type Record = logmodel.Record
 
 type Row struct {
-	ID        string            `json:"id"`
-	Timestamp string            `json:"timestamp,omitempty"`
-	Severity  string            `json:"severity,omitempty"`
-	Message   string            `json:"message"`
-	Fields    map[string]string `json:"fields,omitempty"`
+	ID           string                `json:"id"`
+	Timestamp    string                `json:"timestamp,omitempty"`
+	Severity     string                `json:"severity,omitempty"`
+	Message      string                `json:"message"`
+	Fields       map[string]any        `json:"fields,omitempty"`
+	SourceFormat logmodel.SourceFormat `json:"sourceFormat"`
+	Diagnostics  []logmodel.Diagnostic `json:"diagnostics,omitempty"`
 }
 
 type Snapshot struct {

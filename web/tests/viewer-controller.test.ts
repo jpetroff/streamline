@@ -26,7 +26,7 @@ class FakeAPI implements QueryAPI {
   }
   get(queryId: string): Promise<QueryState> { return Promise.resolve(ready(queryId)); }
   rows(queryId: string, _snapshot: string, offset: bigint): Promise<RowPage> {
-    return Promise.resolve({ snapshot: ready(queryId).snapshot!, offset: offset.toString(), rows: [{ id: '1', message: queryId }] });
+    return Promise.resolve({ snapshot: ready(queryId).snapshot!, offset: offset.toString(), rows: [{ id: '1', message: queryId, sourceFormat: 'text' }] });
   }
   events(): EventConnection { return { close() {} }; }
   delete(queryId: string): Promise<void> { this.deleted.push(queryId); return Promise.resolve(); }

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"streamline/internal/logmodel"
 )
 
 const disconnectedGrace = 60 * time.Second
@@ -180,8 +182,11 @@ func (s *MemoryService) Page(_ context.Context, id, token string, offset uint64,
 		if recordID == 0 || recordID > uint64(len(s.records)) {
 			continue
 		}
-		r := s.records[recordID-1]
-		rows = append(rows, Row{ID: strconv.FormatUint(r.ID, 10), Timestamp: r.Timestamp, Severity: r.Severity, Message: r.Message, Fields: r.Fields})
+		r := logmodel.CloneRecord(s.records[recordID-1])
+		rows = append(rows, Row{
+			ID: strconv.FormatUint(r.ID, 10), Timestamp: r.Timestamp, Severity: r.Severity,
+			Message: r.Message, Fields: r.Fields, SourceFormat: r.SourceFormat, Diagnostics: r.Diagnostics,
+		})
 	}
 	return Page{Snapshot: snapshot.descriptor, Offset: strconv.FormatUint(offset, 10), Rows: rows}, nil
 }
@@ -233,24 +238,29 @@ func (s *MemoryService) Delete(_ context.Context, id string) error {
 	return nil
 }
 
-// Append publishes a complete input batch. It is the ingestion integration point.
-// Append publishes a complete input batch and extends every ready live query.
+// Append publishes a complete input batch and extends every ready live query. It is the ingestion integration point.
 func (s *MemoryService) Append(records []Record) {
 	if len(records) == 0 {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	appended := make([]Record, 0, len(records))
 	for i := range records {
-		records[i].ID = uint64(len(s.records) + 1)
-		s.records = append(s.records, records[i])
+		record := logmodel.CloneRecord(records[i])
+		record.ID = uint64(len(s.records) + 1)
+		if record.SourceFormat == "" {
+			record.SourceFormat = logmodel.FormatText
+		}
+		s.records = append(s.records, record)
+		appended = append(appended, record)
 	}
 	boundary := uint64(len(s.records))
 	for _, q := range s.queries {
 		if q.canceled || q.state.Status != StatusReady {
 			continue
 		}
-		for _, record := range records {
+		for _, record := range appended {
 			if q.predicate(record) {
 				q.matches = append(q.matches, record.ID)
 			}

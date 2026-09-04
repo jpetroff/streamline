@@ -18,7 +18,9 @@ The implementation adds:
 - shared JSON fixtures plus Go and frontend tests for the wire contract and
   concurrency-sensitive behavior.
 
-The binary currently has no stdin ingestion or shared filter-expression engine.
+The binary currently has no stdin ingestion or shared filter-expression engine. The in-memory parser is available but not yet connected to the binary.
+The normalized row fields and their parser ownership are documented in
+[Parser engine](parser.md).
 Its production compiler accepts the empty, input-order query. `query.Compiler`
 and `MemoryService.Append` are the integration points for those later systems.
 

@@ -2,6 +2,13 @@ export type Decimal = string;
 export type InputStatus = 'streaming' | 'eof' | 'error';
 export type QueryStatus = 'building' | 'ready' | 'failed';
 export type QuerySort = 'input';
+export type SourceFormat = 'journald-json' | 'json' | 'text';
+export type JSONValue = string | number | boolean | null | JSONValue[] | { [key: string]: JSONValue };
+
+export interface ParseDiagnostic {
+  code: string;
+  message: string;
+}
 
 export interface APIErrorBody {
   code: string;
@@ -38,7 +45,9 @@ export interface LogRow {
   timestamp?: string;
   severity?: string;
   message: string;
-  fields?: Record<string, string>;
+  fields?: Record<string, JSONValue>;
+  sourceFormat: SourceFormat;
+  diagnostics?: ParseDiagnostic[];
 }
 
 export interface RowPage {
