@@ -58,7 +58,8 @@ flowchart LR
   append --> stored[("Query records")]
   stored --> page["Page result copy"]
   page --> wire["Frontend LogRow"]
-  raw -->|"Bounded 64 KiB chunks after EOF"| browser["Raw frontend panel"]
+  raw --> rawResult["Sanitized RawResult"]
+  rawResult -->|"Bounded 64 KiB chunks after EOF/error"| browser["Raw frontend panel"]
 ```
 
 ## Decision ledger

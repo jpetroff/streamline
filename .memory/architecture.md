@@ -65,53 +65,68 @@ expression tree. `MemoryService.Append`, `SetInputStatus`, and `SetRawOutput`
 are the ingestion integration hooks. A future profile service emits generation events through the query-service
 contract; the following frontend then builds an atomic replacement query.
 
-## Current stdin path and planned first version
+## Implemented stdin path
 
 One stdin stream comes from the user's shell, including SSH + tail, journalctl,
-or Docker. The full session stays in memory until exit. Memory may grow; there
-is no automatic eviction, database, disk spill, or application persistence.
-Ten million 1 KB records require roughly 10 GB for raw input, plus parsed data
-and query indexes. Bounded queues control processing backlog, not retention.
+or Docker. The HTTP server starts immediately and ingestion runs in the
+background. Memory may grow: the parser retains exact source bytes while the
+stream is open, and the query service retains normalized records or terminal
+raw chunks plus query indexes. There is no automatic eviction, database, disk
+spill, or application persistence. Bounded batches control publication latency,
+not retention.
 
 ```mermaid
 flowchart LR
-  Input["stdin<br/>SSH / tail / journalctl / Docker"] --> Capture["Raw capture"]
-  Capture --> Raw["Raw records in RAM"]
-  Capture --> Parse["Framing → parsing → profile rules"]
-  Parse --> Events["Normalized records in RAM"]
-  Raw --> Replay["Profile replay"]
-  Replay --> Parse
-  Events --> Query["Go query engine<br/>filters / sort / aggregation"]
-  Query --> Results["Matching IDs and counts in RAM"]
-  Results --> API["Go HTTP + SSE"]
-  API -->|"requested rows and chart buckets"| UI["Svelte viewer"]
-  UI -->|"query and viewport requests"| API
-  API --> Query
+  Input["stdin"] --> Parser["Streaming framing + recognition"]
+  Parser -->|"first recognized record"| Batches["Records<br/>≤512 or ≤100 ms"]
+  Batches --> Query["MemoryService.Append<br/>inputKind: records"]
+  Parser -->|"EOF/error with no recognized record"| Sanitize["Display-safe raw text"]
+  Sanitize --> Raw["64 KiB UTF-8-safe chunks<br/>inputKind: raw"]
+  Query --> Rows["Query snapshots + row pages"]
+  Raw --> RawAPI["Generation-guarded raw pages"]
+  Rows --> API["HTTP JSON + SSE notifications"]
+  RawAPI --> API
+  API --> UI["Svelte table or raw panel"]
 ```
 
-- Go owns parsing, extraction, filtering, sorting, and graph calculations.
-  The browser handles presentation and requests bounded data windows.
-- Parse JSON Lines, journal JSON/text, Docker wrappers, and plain text.
-  Preserve raw input; normalize ANSI/CRLF for display. Optional explicit
-  multiline rules group stack traces.
-- Declarative profiles are edited in the UI. Applying a profile replays raw
-  records into a new generation and switches atomically after catching up.
-- Queries use a shared expression tree for the filter builder and text syntax.
-  Batched scans create packed matching-ID indexes; live queries evaluate new
-  batches. Other sort orders use a fixed snapshot.
+- A valid journald JSON object, generic JSON object, or timestamped text line
+  permanently selects parsed mode. Earlier unrecognized lines are emitted as
+  text records; later lines remain records even when individually unrecognized.
+- Until recognition, complete frames are buffered. If recognition never occurs,
+  EOF or a read error publishes the whole input only as display-safe raw text.
+- Framing handles LF, CRLF, lone CR, long lines, and a final unterminated line.
+  Raw display normalizes line endings, strips terminal controls, and replaces
+  invalid UTF-8 while preserving visible whitespace.
+- Parsed records are committed progressively. Raw fallback is necessarily
+  withheld until EOF or error establishes that no log record was recognized.
+- EOF and read errors do not stop the web server. Session and SSE state report
+  the terminal status; a read error uses the stable `input_read_error` code.
 - HTTP JSON carries requests/results; SSE carries small progress/change
   notifications. Responses identify session, generation, query revision, and
-  processed-input boundary. Rows and aggregates share a revision.
+  processed-input boundary. SSE announces raw readiness but never carries raw
+  content or parsed rows.
 - The virtualized list renders fixed-height summaries and fetches about 200 rows
   at a time, with a 32 MB page-cache target. Rebase scrolling windows to support
   millions of rows within browser height limits. Details open separately.
-- Planned graphs show volume over time and severity/service/container counts.
-  Aggregate the entire matching dataset in Go, returning bounded chart data.
 - Pausing the view or disconnecting the browser does not stop capture. EOF
   flushes pending records and leaves the viewer running.
 
 `ingest`, `parse`, and `query` now live under `internal/`; profile and
 persistent storage packages remain future work.
+
+## Planned extensions
+
+- Declarative profiles can replay retained source into a new generation and
+  switch atomically after catching up. Source retention beyond the current
+  process-lifetime parser result must be designed before adding replay.
+- Queries can adopt a shared expression tree for the filter builder and text
+  syntax. Additional sort orders must define whether they are live or fixed at
+  query creation.
+- Graphs can show volume over time and severity/service/container counts, with
+  Go aggregating the complete matching snapshot into bounded chart data.
+- Docker wrappers, journal text/export formats, explicit multiline grouping,
+  and nested message parsing require additional recognizers; they are not part
+  of the implemented classification rules.
 
 ## Later: storage middleware
 

@@ -154,14 +154,17 @@ positioned rather than participating in native table layout:
 - unloaded rows keep the same geometry and expose `aria-busy` while their
   placeholder bars remain hidden from assistive technology.
 
-The component selects one of four body projections:
+At the application level, session classification selects the render path. The
+query-specific rows below apply only after the input kind is `records`:
 
 | Condition | Output |
 | --- | --- |
-| No displayed query, no pending query | Centered “Connecting…” status |
-| No displayed query, pending query | Query progress status |
-| Ready snapshot with zero matches | Centered “No log records.” status |
-| Ready snapshot with matches | Virtual spacer and mounted rows/placeholders |
+| Session has not loaded | Centered “Connecting…” status |
+| `inputKind` is `pending` | Centered “Waiting for stdin…” status |
+| `inputKind` is `records`, query is building | Query progress status |
+| `inputKind` is `records`, ready snapshot has zero matches | Centered “No log records.” status |
+| `inputKind` is `records`, ready snapshot has matches | Virtual spacer and mounted rows/placeholders |
+| `inputKind` is `raw` | Read-only monospace raw panel; “No stdin output.” when it has zero chunks |
 
 Transport failures appear in a persistent alert strip above the table. Existing
 rows remain visible when possible. Svelte inserts message content as text, so
@@ -331,10 +334,13 @@ transport. `reduceViewer` is the only function that applies controller actions.
 
 | Action | Visible effect |
 | --- | --- |
+| `session` | Records the authoritative input kind/status used by the root renderer |
 | `pending` / `progress` | Retains the prior display while a replacement builds |
 | `replace` | Atomically installs a different query and its first page set |
 | `extend` | Moves a following query to a newer snapshot and tail pages |
 | `pagesLoaded` | Replaces visible/prefetched pages only for the exact token |
+| `rawStart` | Clears query display state and opens an empty generation-bound raw view |
+| `rawLoading` / `rawPage` | Deduplicates loading and appends only the expected sequential raw page |
 | `pause` | Pins the displayed snapshot |
 | `resume` | Atomically installs the current snapshot/tail and follows |
 | `failed` | Keeps available rows and publishes a structured alert |

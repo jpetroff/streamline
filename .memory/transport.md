@@ -79,6 +79,20 @@ initial event, coalesces ordinary changes over 100 ms, keeps only the newest
 queued event for a slow subscriber, sends 15-second heartbeats, and gives each
 write a five-second deadline.
 
+The raw endpoint requires `generation` and accepts decimal-string `offset` and
+`limit` query parameters:
+
+```text
+GET /api/v1/input/raw?generation=1&offset=0&limit=4
+```
+
+It returns `{ generationId, offset, totalChunks, chunks }`; the three numeric
+identifiers/counts are decimal strings. Chunks are immutable, UTF-8-safe, and
+at most 64 KiB. Concatenating pages in offset order reconstructs the sanitized
+display text without inserted separators. Stable validation/state codes are
+`generation_required`, `generation_changed`, `raw_unavailable`,
+`invalid_offset`, and `invalid_limit`.
+
 ## Consistency and lifecycle
 
 The frontend reads session state before choosing its data path. Pending and

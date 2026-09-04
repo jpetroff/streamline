@@ -67,8 +67,8 @@ flowchart LR
 ```
 
 The dark shell initially waits for stdin. Recognized logs appear in the virtual
-table; terminal unrecognized input appears in the raw view after EOF. Check connectivity at
-[development health](http://localhost:5173/api/v1/health) or
+table; terminal unrecognized input appears in the raw view after EOF. Check
+connectivity at [development health](http://localhost:5173/api/v1/health) or
 [standalone health](http://localhost:8080/api/v1/health).
 
 Vite handles frontend changes immediately. Restart the Go process after Go
@@ -111,7 +111,8 @@ application dependencies.
 - `bin/streamline`: standalone executable.
 
 These directories are ignored by Git. Runtime session data is not written to
-them; the current scaffold has no log processing or storage.
+them: stdin source bytes, parsed records, raw chunks, and query indexes are
+process-memory only and disappear when Streamline exits.
 
 Bun uses its global download cache (normally `~/.bun/install/cache`). Existing
 `.tools/` and `.cache/pnpm-store/` directories from the previous setup are no
