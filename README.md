@@ -1,6 +1,7 @@
 # Streamline
 
-Scaffolding for a local log viewer: a Go binary and an empty Svelte web interface.
+A local log-viewer scaffold with a Go binary, versioned query transport, and a
+dark Svelte interface with viewport-driven log virtualization.
 
 ## Get started
 
@@ -19,8 +20,9 @@ make setup
 make dev
 ```
 
-Open [localhost:5173](http://localhost:5173). The page is intentionally empty.
-The health endpoint is [localhost:5173/api/v1/health](http://localhost:5173/api/v1/health).
+Open [localhost:5173](http://localhost:5173). The shell initially shows an empty
+log table because runtime stdin ingestion is not connected yet. The health
+endpoint is [localhost:5173/api/v1/health](http://localhost:5173/api/v1/health).
 Press Ctrl+C to stop both processes.
 
 ```sh
@@ -36,6 +38,8 @@ Setup checks the global Go and Bun installations and installs dependencies
 from `bun.lock`. Bun runs the frontend tooling. The built binary runs on its own.
 
 - [Architecture and extension diagrams](.memory/architecture.md)
+- [Frontend visual output and virtualization](.memory/frontend.md)
 - [Development, commands, and debugging](.memory/development.md)
 
-Only the frontend shell, health endpoint, and build tooling are implemented.
+The frontend shell, binary–frontend transport, parser, in-memory query service,
+health endpoint, and build tooling are implemented.

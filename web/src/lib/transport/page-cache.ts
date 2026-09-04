@@ -2,6 +2,7 @@ import type { RowPage } from './types';
 
 interface Entry { page: RowPage; bytes: number; countAtFetch: bigint }
 
+/** Approximate-size LRU for immutable row pages, keyed by query and page coordinates. */
 export class PageCache {
   private entries = new Map<string, Entry>();
   private bytes = 0;

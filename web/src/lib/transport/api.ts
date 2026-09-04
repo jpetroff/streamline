@@ -1,5 +1,6 @@
 import type { QueryEvent, QuerySort, QueryState, RowPage, Session } from './types';
 
+/** Structured transport failure carrying the server's stable error code and HTTP status. */
 export class TransportError extends Error {
   /** Creates an error carrying the stable server code and HTTP status. */
   constructor(public readonly code: string, message: string, public readonly status: number) {
@@ -17,11 +18,13 @@ async function responseJSON<T>(response: Response): Promise<T> {
   return body as T;
 }
 
+/** Close-only handle for the browser's active query event stream. */
 export interface EventConnection {
   /** Closes the underlying browser event stream. */
   close(): void;
 }
 
+/** Transport boundary consumed by the viewer controller and replaced by fakes in tests. */
 export interface QueryAPI {
   /** Reads current session identity and input state. */
   session(signal?: AbortSignal): Promise<Session>;
@@ -37,6 +40,7 @@ export interface QueryAPI {
   delete(queryId: string): Promise<void>;
 }
 
+/** Same-origin HTTP and EventSource implementation of the versioned query protocol. */
 export class HTTPQueryAPI implements QueryAPI {
   /** Creates a same-origin client rooted at the versioned API prefix. */
   constructor(private readonly baseURL = '/api/v1') {}

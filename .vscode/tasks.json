@@ -39,6 +39,34 @@
       }
     },
     {
+      "label": "Streamline: vite-dev",
+      "type": "shell",
+      "command": "make dev-web",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": {
+        "owner": "streamline",
+        "pattern": {
+          "regexp": "^(.*):(\\d+):(\\d+):\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "message": 4
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": ".*Local:.*localhost:5173.*"
+        }
+      }
+    },
+    {
       "label": "Streamline: build",
       "type": "shell",
       "command": "make build",

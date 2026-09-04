@@ -10,9 +10,9 @@
 | `internal/logmodel` | Universal typed log records, source formats, parser diagnostics, and deep cloning |
 | `internal/parse` | In-memory capture, terminal sanitization, per-record detection, and journald/JSON/text normalization |
 | `internal/webassets` | Embedded frontend in release builds; development build excludes assets |
-| `web` | Svelte 5 viewer controller, HTTP/SSE client, 32 MB page cache, filter/follow/pagination shell |
-| UI foundations | shadcn-svelte configuration, Bits UI, neutral theme, class utility |
-| Installed for later | TanStack Svelte Virtual and ECharts |
+| `web` | Svelte 5 viewer controller, HTTP/SSE client, 32 MB page cache, dark application shell, and segmented virtual log table |
+| UI foundations | shadcn-svelte configuration, Bits UI, dark neutral theme, class utility, and Lucide icons |
+| Installed for later | ECharts |
 
 The server uses Go's standard library and builds with CGo disabled.
 The parser engine is implemented but is not wired to runtime input. No stdin ingestion, shared filter-expression compiler, profiles, or graphs are implemented. The production service currently accepts the unfiltered input-order query; ingestion will call its batch append hook and the query engine will provide the compiler.
@@ -147,6 +147,7 @@ contract tests against memory and future persistent providers.
 
 ## References
 
+- [Frontend visual output](frontend.md)
 - [shadcn-svelte](https://www.shadcn-svelte.com/docs)
 - [TanStack Svelte Virtual](https://tanstack.com/virtual/latest/docs/framework/svelte/svelte-virtual)
 - [Journal export formats](https://systemd.io/JOURNAL_EXPORT_FORMATS/)

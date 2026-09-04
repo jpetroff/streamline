@@ -14,7 +14,8 @@ The implementation adds:
   and resource release;
 - an SSE endpoint for progress and state notifications;
 - a Svelte viewer controller with intent/revision guards, follow and pause modes,
-  atomic filter replacement, and a 32 MB row-page cache;
+  atomic filter replacement, page-aligned viewport loading, and a 32 MB row-page cache;
+- a segmented TanStack virtual table that keeps global row offsets as 64-bit values;
 - shared JSON fixtures plus Go and frontend tests for the wire contract and
   concurrency-sensitive behavior.
 
@@ -47,7 +48,9 @@ service when it builds the HTTP handler.
 
 The frontend separates concerns into wire types, an HTTP/SSE client, a bounded
 LRU page cache, a pure state reducer, and `ViewerController`. `App.svelte` owns
-one controller for its lifecycle and renders only the current window.
+one controller for its lifecycle. The virtual table renders only visible rows
+and asks the controller for aligned pages around its overscanned viewport. See
+[Frontend visual output](frontend.md) for the Svelte and pixel-level path.
 
 ## HTTP and SSE contract
 
@@ -132,5 +135,6 @@ Go tests, Go vet, and formatting checks. The Go suite covers append-during-scan,
 stable old-snapshot pagination, compiler injection, notification coalescing,
 query expiry, HTTP validation, structured errors, and initial SSE state. The
 frontend suite covers atomic replacement, reversed query responses, pause
-semantics, partial-tail cache invalidation, and the shared 64-bit JSON fixture.
+semantics, page prefetch and deduplication, stale viewport responses, segmented
+bigint virtual offsets, partial-tail cache invalidation, and the shared 64-bit JSON fixture.
 A production frontend build and standalone Go build verify the embedded path.

@@ -1,32 +1,37 @@
-import type { APIErrorBody, LogRow, QuerySort, Session, Snapshot } from './types';
+import type { APIErrorBody, QuerySort, RowPage, Session, Snapshot } from './types';
 
+/** Query snapshot and small page set currently presented by the virtual table. */
 export interface DisplayedQuery {
   queryId: string;
   filter: string;
   sort: QuerySort;
   snapshot: Snapshot;
-  offset: bigint;
-  rows: LogRow[];
+  /** Visible and prefetched pages only; the larger reusable set remains in PageCache. */
+  pages: RowPage[];
 }
 
+/** Immutable UI projection published to every controller subscriber. */
 export interface ViewerState {
+  /** True only while snapshot notifications should move the table to the latest tail. */
   following: boolean;
   displayed?: DisplayedQuery;
   pending?: { queryId: string; filter: string; progress?: number };
   error?: APIErrorBody;
+  /** Signals that a paused snapshot expired and must not be replaced silently. */
   needsRefresh: boolean;
   session?: Session;
 }
 
+/** Exhaustive events accepted by the pure viewer reducer. */
 export type ViewerAction =
   | { type: 'session'; session: Session }
   | { type: 'pending'; queryId: string; filter: string }
   | { type: 'progress'; queryId: string; processed: bigint; total: bigint }
   | { type: 'replace'; query: DisplayedQuery }
-  | { type: 'extend'; snapshot: Snapshot; offset: bigint; rows: LogRow[] }
-  | { type: 'pageLoaded'; snapshot: Snapshot; offset: bigint; rows: LogRow[] }
+  | { type: 'extend'; snapshot: Snapshot; pages: RowPage[] }
+  | { type: 'pagesLoaded'; snapshot: Snapshot; pages: RowPage[] }
   | { type: 'pause' }
-  | { type: 'resume' }
+  | { type: 'resume'; snapshot: Snapshot; pages: RowPage[] }
   | { type: 'failed'; error: APIErrorBody }
   | { type: 'refreshRequired'; error: APIErrorBody };
 
@@ -43,12 +48,14 @@ export function reduceViewer(state: ViewerState, action: ViewerAction): ViewerSt
     case 'replace': return { ...state, displayed: action.query, pending: undefined, error: undefined, needsRefresh: false };
     case 'extend':
       if (!state.following || state.displayed?.queryId !== action.snapshot.queryId) return state;
-      return { ...state, displayed: { ...state.displayed, snapshot: action.snapshot, offset: action.offset, rows: action.rows } };
-    case 'pageLoaded':
-      if (state.displayed?.queryId !== action.snapshot.queryId) return state;
-      return { ...state, displayed: { ...state.displayed, snapshot: action.snapshot, offset: action.offset, rows: action.rows } };
+      return { ...state, displayed: { ...state.displayed, snapshot: action.snapshot, pages: action.pages } };
+    case 'pagesLoaded':
+      if (state.displayed?.queryId !== action.snapshot.queryId || state.displayed.snapshot.snapshotToken !== action.snapshot.snapshotToken) return state;
+      return { ...state, displayed: { ...state.displayed, pages: action.pages } };
     case 'pause': return { ...state, following: false };
-    case 'resume': return { ...state, following: true, needsRefresh: false };
+    case 'resume':
+      if (state.displayed?.queryId !== action.snapshot.queryId) return state;
+      return { ...state, following: true, needsRefresh: false, error: undefined, displayed: { ...state.displayed, snapshot: action.snapshot, pages: action.pages } };
     case 'failed': return { ...state, pending: undefined, error: action.error };
     case 'refreshRequired': return { ...state, following: false, needsRefresh: true, error: action.error };
   }

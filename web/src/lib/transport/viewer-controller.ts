@@ -1,17 +1,21 @@
+import { pageOffsetsForRange, PAGE_SIZE } from '$lib/virtual-window';
 import { HTTPQueryAPI, TransportError, type EventConnection, type QueryAPI } from './api';
 import { PageCache } from './page-cache';
-import type { APIErrorBody, QueryEvent, QuerySort, QueryState, Snapshot } from './types';
+import type { APIErrorBody, QueryEvent, QuerySort, QueryState, RowPage, Snapshot } from './types';
 import { reduceViewer, type ViewerState } from './viewer-state';
 
-const PAGE_SIZE = 200;
-
+/** Coordinates query lifecycle, SSE notifications, guarded page loading, and follow state. */
 export class ViewerController {
   state: ViewerState = { following: true, needsRefresh: false };
   private intent = 0;
+  private rangeRequest = 0;
   private abort?: AbortController;
   private activeEvents?: EventConnection;
   private pendingEvents?: EventConnection;
+  private activeRange?: { key: string; promise: Promise<void> };
+  private lastLoadedRangeKey?: string;
   private cache = new PageCache();
+  private inflightPages = new Map<string, Promise<RowPage | undefined>>();
   private listeners = new Set<(state: ViewerState) => void>();
   private requestedRevision = new Map<string, bigint>();
   private disposed = false;
@@ -29,6 +33,10 @@ export class ViewerController {
   /** Builds a replacement query while preserving the current display until its first page is ready. */
   async setQuery(filter: string, sort: QuerySort = 'input') {
     const intent = ++this.intent;
+    this.rangeRequest++;
+    this.activeRange = undefined;
+    this.lastLoadedRangeKey = undefined;
+    this.inflightPages.clear();
     this.abort?.abort();
     this.abort = new AbortController();
     const superseded = this.state.pending?.queryId;
@@ -51,37 +59,67 @@ export class ViewerController {
     }
   }
 
-  /** Loads an arbitrary viewport window and pauses when navigating away from the tail. */
-  async loadWindow(offset: bigint, limit = PAGE_SIZE) {
+  /** Ensures the page-aligned windows around a virtual viewport are available. */
+  async ensureRange(start: bigint, endExclusive: bigint) {
     const displayed = this.state.displayed;
     if (!displayed) return;
-    const count = BigInt(displayed.snapshot.matchedCount);
-    if (offset + BigInt(limit) < count) this.pause();
-    try {
-      await this.loadPage(this.intent, displayed.snapshot, offset, limit, 'pageLoaded');
-    } catch (error) {
-      const body = errorBody(error);
-      if (error instanceof TransportError && error.code === 'snapshot_invalid') this.dispatch({ type: 'refreshRequired', error: body });
-      else if (!isAbort(error)) this.dispatch({ type: 'failed', error: body });
-    }
+    const snapshot = displayed.snapshot;
+    const offsets = pageOffsetsForRange(start, endExclusive, BigInt(snapshot.matchedCount));
+    if (offsets.length === 0) return;
+    const key = [snapshot.queryId, snapshot.snapshotToken, ...offsets.map(String)].join(':');
+    if (this.activeRange?.key === key) return this.activeRange.promise;
+    if (this.lastLoadedRangeKey === key) return;
+
+    const request = ++this.rangeRequest;
+    const intent = this.intent;
+    const promise = (async () => {
+      try {
+        const pages = await this.fetchPages(snapshot, offsets, intent);
+        if (!this.current(intent) || request !== this.rangeRequest) return;
+        const current = this.state.displayed;
+        if (current?.queryId !== snapshot.queryId || current.snapshot.snapshotToken !== snapshot.snapshotToken) return;
+        this.dispatch({ type: 'pagesLoaded', snapshot, pages });
+        this.lastLoadedRangeKey = key;
+      } catch (error) {
+        if (!this.current(intent) || request !== this.rangeRequest || isAbort(error)) return;
+        const body = errorBody(error);
+        if (error instanceof TransportError && (error.code === 'snapshot_invalid' || error.status === 404)) {
+          this.dispatch({ type: 'refreshRequired', error: body });
+        } else {
+          this.dispatch({ type: 'failed', error: body });
+        }
+      } finally {
+        if (this.activeRange?.key === key) this.activeRange = undefined;
+      }
+    })();
+    this.activeRange = { key, promise };
+    return promise;
   }
 
   /** Pins the currently displayed snapshot while ingestion and query evaluation continue. */
-  pause() { this.dispatch({ type: 'pause' }); }
+  pause() {
+    if (this.state.following) this.dispatch({ type: 'pause' });
+  }
 
   /** Resynchronizes and moves the display to the latest matching tail. */
   async resume() {
     const displayed = this.state.displayed;
-    if (!displayed) return;
+    if (!displayed || this.state.following) return;
+    const intent = this.intent;
     try {
       const latest = await this.api.get(displayed.queryId);
-      if (latest.status !== 'ready' || !latest.snapshot) return;
-      await this.loadPage(this.intent, latest.snapshot, tailOffset(latest.snapshot), PAGE_SIZE, 'pageLoaded');
-      this.dispatch({ type: 'resume' });
+      if (latest.status !== 'ready' || !latest.snapshot || !this.current(intent)) return;
+      const pages = await this.initialPages(latest.snapshot, false, intent);
+      if (!this.current(intent) || this.state.displayed?.queryId !== displayed.queryId) return;
+      this.lastLoadedRangeKey = undefined;
+      this.requestedRevision.set(displayed.queryId, BigInt(latest.snapshot.revision));
+      this.dispatch({ type: 'resume', snapshot: latest.snapshot, pages });
     } catch (error) {
       if (error instanceof TransportError && error.status === 404) {
         this.dispatch({ type: 'refreshRequired', error: errorBody(error) });
-      } else this.dispatch({ type: 'failed', error: errorBody(error) });
+      } else if (!isAbort(error)) {
+        this.dispatch({ type: 'failed', error: errorBody(error) });
+      }
     }
   }
 
@@ -89,12 +127,14 @@ export class ViewerController {
   dispose() {
     this.disposed = true;
     this.intent++;
+    this.rangeRequest++;
     this.abort?.abort();
     this.activeEvents?.close();
     this.pendingEvents?.close();
     const ids = new Set([this.state.displayed?.queryId, this.state.pending?.queryId].filter(Boolean) as string[]);
     for (const id of ids) void this.api.delete(id);
     this.listeners.clear();
+    this.inflightPages.clear();
     this.cache.clear();
   }
 
@@ -121,45 +161,70 @@ export class ViewerController {
       return;
     }
     if (!query.snapshot) return;
-    const revision = BigInt(query.snapshot.revision);
+    const snapshot = query.snapshot;
+    const revision = BigInt(snapshot.revision);
     const replacing = this.state.displayed?.queryId !== query.queryId;
     if (!replacing && !this.state.following) return;
     if (revision <= (this.requestedRevision.get(query.queryId) ?? -1n)) return;
     this.requestedRevision.set(query.queryId, revision);
-    const offset = replacing && !this.state.following ? 0n : tailOffset(query.snapshot);
-    let page;
-    try { page = await this.fetchPage(query.snapshot, offset, PAGE_SIZE, intent); }
-    catch (error) {
+    const atHead = replacing && !this.state.following;
+    let pages;
+    try {
+      pages = await this.initialPages(snapshot, atHead, intent);
+    } catch (error) {
       if (this.requestedRevision.get(query.queryId) === revision) this.requestedRevision.delete(query.queryId);
       throw error;
     }
-    if (!page || !this.current(intent) || this.requestedRevision.get(query.queryId) !== revision) return;
+    if (!this.current(intent) || this.requestedRevision.get(query.queryId) !== revision) return;
     if (replacing) {
       const oldID = this.state.displayed?.queryId;
-      this.dispatch({ type: 'replace', query: { queryId: query.queryId, filter, sort, snapshot: page.snapshot, offset, rows: page.rows } });
+      this.dispatch({ type: 'replace', query: { queryId: query.queryId, filter, sort, snapshot, pages } });
       this.activeEvents?.close();
       this.activeEvents = this.pendingEvents;
       this.pendingEvents = undefined;
-      if (oldID && oldID !== query.queryId) { this.cache.deleteQuery(oldID); void this.api.delete(oldID); }
+      if (oldID && oldID !== query.queryId) {
+        this.requestedRevision.delete(oldID);
+        this.cache.deleteQuery(oldID);
+        void this.api.delete(oldID);
+      }
     } else {
-      this.dispatch({ type: 'extend', snapshot: page.snapshot, offset, rows: page.rows });
+      this.dispatch({ type: 'extend', snapshot, pages });
     }
   }
 
-  /** Fetches and applies a page only while its originating intent remains current. */
-  private async loadPage(intent: number, snapshot: Snapshot, offset: bigint, limit: number, type: 'extend' | 'pageLoaded') {
-    const page = await this.fetchPage(snapshot, offset, limit, intent);
-    if (page && this.current(intent)) this.dispatch({ type, snapshot: page.snapshot, offset, rows: page.rows });
+  /** Loads the first visible page for an atomic head or tail transition. */
+  private initialPages(snapshot: Snapshot, atHead: boolean, intent: number) {
+    const total = BigInt(snapshot.matchedCount);
+    if (total === 0n) return Promise.resolve([] as RowPage[]);
+    const focus = atHead ? 0n : total - 1n;
+    return this.fetchPages(snapshot, pageOffsetsForRange(focus, focus + 1n, total, 0), intent);
   }
 
-  /** Resolves a page through the bounded cache and verifies its snapshot identity. */
-  private async fetchPage(snapshot: Snapshot, offset: bigint, limit: number, intent: number) {
+  /** Resolves a group of fixed pages while retaining only valid results. */
+  private async fetchPages(snapshot: Snapshot, offsets: bigint[], intent: number) {
+    const pages = await Promise.all(offsets.map(offset => this.fetchPage(snapshot, offset, PAGE_SIZE, intent)));
+    return pages.filter((page): page is RowPage => page !== undefined);
+  }
+
+  /** Resolves a page through the bounded cache, request deduplication, and snapshot guards. */
+  private fetchPage(snapshot: Snapshot, offset: bigint, limit: number, intent: number) {
     const cached = this.cache.get(snapshot.queryId, offset, limit, BigInt(snapshot.matchedCount));
-    if (cached) return { ...cached, snapshot };
-    const page = await this.api.rows(snapshot.queryId, snapshot.snapshotToken, offset, limit, this.abort?.signal);
-    if (!this.current(intent) || page.snapshot.queryId !== snapshot.queryId || page.snapshot.snapshotToken !== snapshot.snapshotToken) return undefined;
-    this.cache.set(page, limit);
-    return page;
+    if (cached) return Promise.resolve({ ...cached, snapshot });
+    const key = [snapshot.queryId, snapshot.snapshotToken, offset, limit].join(':');
+    const existing = this.inflightPages.get(key);
+    if (existing) return existing;
+
+    const pending = this.api.rows(snapshot.queryId, snapshot.snapshotToken, offset, limit, this.abort?.signal)
+      .then(page => {
+        if (!this.current(intent) || page.snapshot.queryId !== snapshot.queryId || page.snapshot.snapshotToken !== snapshot.snapshotToken) return undefined;
+        this.cache.set(page, limit);
+        return page;
+      })
+      .finally(() => {
+        if (this.inflightPages.get(key) === pending) this.inflightPages.delete(key);
+      });
+    this.inflightPages.set(key, pending);
+    return pending;
   }
 
   /** Reconnects the previous displayed query after a replacement command fails. */
@@ -192,11 +257,6 @@ export class ViewerController {
   }
 }
 
-/** Calculates the first offset of the default tail window. */
-function tailOffset(snapshot: Snapshot) {
-  const count = BigInt(snapshot.matchedCount);
-  return count > BigInt(PAGE_SIZE) ? count - BigInt(PAGE_SIZE) : 0n;
-}
 /** Distinguishes expected fetch cancellation from actionable transport failures. */
 function isAbort(error: unknown) { return error instanceof DOMException && error.name === 'AbortError'; }
 /** Converts unknown client failures into the UI error contract. */

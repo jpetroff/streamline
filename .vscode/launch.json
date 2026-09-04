@@ -29,6 +29,19 @@
         "**/node_modules/**"
       ],
       "preLaunchTask": "Streamline: dev"
+    },
+    {
+      "name": "Debug Streamline Go with stdin",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/cmd/streamline",
+      "cwd": "${workspaceFolder}",
+      "buildFlags": "-tags=dev",
+      "args": ["-port", "8080"],
+      "stdinFrom": "${workspaceFolder}/internal/parse/testdata/journald.jsonl",
+      "console": "integratedTerminal",
+      "showLog": false
     }
   ]
 }
