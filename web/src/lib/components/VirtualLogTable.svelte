@@ -20,10 +20,14 @@
     viewer,
     controller,
     columns,
+    selectedRowId,
+    onOpenDetails,
   }: {
     viewer: ViewerState;
     controller: ViewerController;
     columns: readonly string[];
+    selectedRowId?: string;
+    onOpenDetails: (row: LogRow) => void;
   } = $props();
   let scrollElement = $state<HTMLDivElement>();
   let segmentBase = $state(0n);
@@ -149,6 +153,22 @@
     });
   }
 
+  function handleRowClick(event: MouseEvent, row: LogRow | undefined) {
+    if (!row || !event.shiftKey || event.button !== 0) return;
+    event.preventDefault();
+    onOpenDetails(row);
+  }
+
+  function handleRowKeydown(event: KeyboardEvent, row: LogRow | undefined) {
+    if (!row || !event.shiftKey || event.key !== 'Enter') return;
+    event.preventDefault();
+    onOpenDetails(row);
+  }
+
+  function preventShiftSelection(event: MouseEvent, row: LogRow | undefined) {
+    if (row && event.shiftKey && event.button === 0) event.preventDefault();
+  }
+
   /** Builds the sparse logical-offset lookup used by currently mounted virtual rows. */
   function indexPages(pages: RowPage[]) {
     const rows = new Map<string, LogRow>();
@@ -204,11 +224,18 @@
             {#each $virtualizer.getVirtualItems() as item (item.key)}
               {@const logicalIndex = segmentBase + BigInt(item.index)}
               {@const row = rowsByOffset.get(logicalIndex.toString())}
+              {@const isSelected = row !== undefined && row.id === selectedRowId}
               <div
-                class="absolute left-0 top-0 grid w-full items-center border-b border-border/70 px-3 font-mono text-xs hover:bg-row-hover"
+                class={`absolute left-0 top-0 grid w-full items-center border-b border-border/70 px-3 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${isSelected ? 'bg-accent' : 'hover:bg-row-hover'}`}
                 style={`height: ${item.size}px; transform: translateY(${item.start}px); grid-template-columns: ${gridTemplate};`}
                 role="row"
                 aria-busy={row === undefined}
+                aria-selected={row ? isSelected : undefined}
+                aria-keyshortcuts={row ? 'Shift+Enter' : undefined}
+                tabindex={row ? 0 : undefined}
+                onmousedown={event => preventShiftSelection(event, row)}
+                onclick={event => handleRowClick(event, row)}
+                onkeydown={event => handleRowKeydown(event, row)}
               >
                 {#if row}
                   {#each columns as column, index (`${index}:${column}`)}

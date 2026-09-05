@@ -3,6 +3,7 @@ import {
   ABSENT_COLUMN_TEXT,
   findSampleFields,
   formatColumnValue,
+  formatDetailColumnValue,
   parseColumnDraft,
   resolveColumnValue,
 } from '../src/lib/columns';
@@ -56,6 +57,33 @@ describe('column value lookup and formatting', () => {
     expect(formatColumnValue({ host: 'example.test' })).toBe('{"host":"example.test"}');
     expect(formatColumnValue(['one', 2, null])).toBe('["one",2,null]');
     expect(formatColumnValue(undefined)).toBe(ABSENT_COLUMN_TEXT);
+  });
+
+  test('renders expanded structured values for row details', () => {
+    expect(formatDetailColumnValue({ host: 'example.test', secure: true })).toEqual({
+      text: '{\n  "host": "example.test",\n  "secure": true\n}',
+      kind: 'json',
+    });
+    expect(formatDetailColumnValue(['one', { nested: 2 }])).toEqual({
+      text: '[\n  "one",\n  {\n    "nested": 2\n  }\n]',
+      kind: 'json',
+    });
+  });
+
+  test('prettifies encoded JSON containers without reinterpreting other strings', () => {
+    expect(formatDetailColumnValue(' {"host":"example.test","ports":[80,443]} ')).toEqual({
+      text: '{\n  "host": "example.test",\n  "ports": [\n    80,\n    443\n  ]\n}',
+      kind: 'json',
+    });
+    expect(formatDetailColumnValue('[broken')).toEqual({ text: '[broken', kind: 'scalar' });
+    expect(formatDetailColumnValue('42')).toEqual({ text: '42', kind: 'scalar' });
+    expect(formatDetailColumnValue('null')).toEqual({ text: 'null', kind: 'scalar' });
+  });
+
+  test('keeps absent, null, and scalar detail values distinct', () => {
+    expect(formatDetailColumnValue(undefined)).toEqual({ text: ABSENT_COLUMN_TEXT, kind: 'absent' });
+    expect(formatDetailColumnValue(null)).toEqual({ text: 'null', kind: 'scalar' });
+    expect(formatDetailColumnValue(false)).toEqual({ text: 'false', kind: 'scalar' });
   });
 
   test('supports the configured Caddy column example', () => {

@@ -1,0 +1,68 @@
+<script lang="ts">
+  import { X } from '@lucide/svelte';
+  import { formatDetailColumnValue, resolveColumnValue } from '$lib/columns';
+  import type { LogRow } from '$lib/transport/types';
+
+  let {
+    row,
+    columns,
+    onClose,
+  }: {
+    row: LogRow;
+    columns: readonly string[];
+    onClose: () => void;
+  } = $props();
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    onClose();
+  }
+</script>
+
+<svelte:window onkeydown={handleKeydown} />
+
+<aside
+  class="flex h-full w-[clamp(20rem,32vw,30rem)] min-w-0 shrink-0 flex-col border-l bg-card text-card-foreground"
+  aria-label="Row details"
+>
+  <header class="flex h-12 shrink-0 items-center justify-between gap-3 border-b px-4">
+    <div class="min-w-0">
+      <h2 class="text-sm font-semibold">Row details</h2>
+      <p class="truncate font-mono text-[0.6875rem] text-muted-foreground" title={`Row ${row.id}`}>Row {row.id}</p>
+    </div>
+    <button
+      type="button"
+      onclick={onClose}
+      class="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      aria-label="Close row details"
+      title="Close row details (Escape)"
+    >
+      <X size={16} aria-hidden="true" />
+    </button>
+  </header>
+
+  <div class="min-h-0 flex-1 overflow-y-auto p-3">
+    <dl class="space-y-3">
+      {#each columns as column, index (`${index}:${column}`)}
+        {@const value = resolveColumnValue(row.fields, column)}
+        {@const formatted = formatDetailColumnValue(value)}
+        <div class="overflow-hidden rounded-md border bg-background">
+          <dt class="border-b bg-muted/30 px-3 py-2 font-mono text-xs font-medium text-muted-foreground" title={column}>
+            {column}
+          </dt>
+          <dd class="m-0">
+            {#if formatted.kind === 'json'}
+              <pre class="max-h-80 overflow-auto p-3 font-mono text-xs leading-5 text-foreground">{formatted.text}</pre>
+            {:else}
+              <div
+                class={`whitespace-pre-wrap break-words px-3 py-2 font-mono text-xs leading-5 ${formatted.kind === 'absent' ? 'text-muted-foreground/70' : 'text-foreground'}`}
+                aria-label={formatted.kind === 'absent' ? `${column}: not present` : undefined}
+              >{formatted.text}</div>
+            {/if}
+          </dd>
+        </div>
+      {/each}
+    </dl>
+  </div>
+</aside>

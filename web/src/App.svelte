@@ -3,14 +3,23 @@
   import { DEFAULT_COLUMNS } from '$lib/columns';
   import ColumnSidebar from '$lib/components/ColumnSidebar.svelte';
   import RawOutput from '$lib/components/RawOutput.svelte';
+  import RowDetailPanel from '$lib/components/RowDetailPanel.svelte';
   import VirtualLogTable from '$lib/components/VirtualLogTable.svelte';
   import { ViewerController } from '$lib/transport/viewer-controller';
+  import type { LogRow } from '$lib/transport/types';
   import type { ViewerState } from '$lib/transport/viewer-state';
+
+  interface SelectedRow {
+    row: LogRow;
+    queryId: string;
+    generationId: string;
+  }
 
   const controller = new ViewerController();
   let viewer = $state<ViewerState>(controller.state);
   let source = $state('stdin');
   let columns = $state<string[]>([...DEFAULT_COLUMNS]);
+  let selectedRow = $state<SelectedRow>();
 
   // Own the controller for exactly the lifetime of the root Svelte component.
   onMount(() => {
@@ -21,6 +30,25 @@
       controller.dispose();
     };
   });
+
+  // Details survive virtual page rotation, but never cross query or input generations.
+  $effect(() => {
+    const selection = selectedRow;
+    const displayed = viewer.displayed;
+    if (!selection) return;
+    if (
+      viewer.session?.inputKind !== 'records' ||
+      !displayed ||
+      displayed.queryId !== selection.queryId ||
+      displayed.snapshot.generationId !== selection.generationId
+    ) selectedRow = undefined;
+  });
+
+  function openDetails(row: LogRow) {
+    const displayed = viewer.displayed;
+    if (!displayed) return;
+    selectedRow = { row, queryId: displayed.queryId, generationId: displayed.snapshot.generationId };
+  }
 </script>
 
 <svelte:head>
@@ -57,7 +85,7 @@
       </div>
     {/if}
 
-    <div class="min-h-0 flex-1">
+    <div class="min-h-0 min-w-0 flex-1">
       {#if !viewer.session}
         <div class="grid h-full place-items-center px-6 text-sm text-muted-foreground" role="status">Connecting…</div>
       {:else if viewer.session.inputKind === 'pending'}
@@ -65,7 +93,20 @@
       {:else if viewer.session.inputKind === 'raw'}
         <RawOutput {viewer} {controller} />
       {:else}
-        <VirtualLogTable {viewer} {controller} {columns} />
+        <div class="flex h-full min-h-0 min-w-0 overflow-hidden">
+          <div class="min-h-0 min-w-0 flex-1">
+            <VirtualLogTable
+              {viewer}
+              {controller}
+              {columns}
+              selectedRowId={selectedRow?.row.id}
+              onOpenDetails={openDetails}
+            />
+          </div>
+          {#if selectedRow}
+            <RowDetailPanel row={selectedRow.row} {columns} onClose={() => { selectedRow = undefined; }} />
+          {/if}
+        </div>
       {/if}
     </div>
   </main>
