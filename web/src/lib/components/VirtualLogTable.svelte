@@ -2,6 +2,7 @@
   import { get } from 'svelte/store';
   import { tick } from 'svelte';
   import { createVirtualizer } from '@tanstack/svelte-virtual';
+  import { formatColumnValue, resolveColumnValue } from '$lib/columns';
   import type { ViewerController } from '$lib/transport/viewer-controller';
   import type { LogRow, RowPage } from '$lib/transport/types';
   import type { ViewerState } from '$lib/transport/viewer-state';
@@ -15,7 +16,15 @@
     type VirtualSegment,
   } from '$lib/virtual-window';
 
-  let { viewer, controller }: { viewer: ViewerState; controller: ViewerController } = $props();
+  let {
+    viewer,
+    controller,
+    columns,
+  }: {
+    viewer: ViewerState;
+    controller: ViewerController;
+    columns: readonly string[];
+  } = $props();
   let scrollElement = $state<HTMLDivElement>();
   let segmentBase = $state(0n);
   let segmentCount = $state(0);
@@ -26,6 +35,8 @@
 
   let total = $derived(viewer.displayed ? BigInt(viewer.displayed.snapshot.matchedCount) : 0n);
   let rowsByOffset = $derived(indexPages(viewer.displayed?.pages ?? []));
+  let gridTemplate = $derived(columns.map(() => 'minmax(12rem, 1fr)').join(' '));
+  let minimumTableWidth = $derived(`${columns.length * 12}rem`);
 
   const virtualizer = createVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: 0,
@@ -154,52 +165,72 @@
 </script>
 
 <section class="flex h-full min-h-0 flex-col bg-background" aria-label="Log output">
-  <div class="flex min-h-0 flex-1 flex-col" role="table" aria-label="Log records" aria-busy={viewer.pending !== undefined}>
-    <div class="grid h-9 shrink-0 grid-cols-[12rem_7rem_minmax(0,1fr)] items-center border-b bg-table-header px-3 font-mono text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground" role="rowgroup">
-      <div role="row" class="contents">
-        <div role="columnheader">Time</div>
-        <div role="columnheader">Level</div>
-        <div role="columnheader">Message</div>
-      </div>
-    </div>
-
-    <div bind:this={scrollElement} class="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden" role="rowgroup">
-      {#if !viewer.displayed}
-        <div class="grid h-full place-items-center px-6 text-sm text-muted-foreground" role="status">
-          {#if viewer.pending}
-            Preparing logs{viewer.pending.progress === undefined ? '…' : `… ${Math.round(viewer.pending.progress * 100)}%`}
-          {:else}
-            Connecting…
-          {/if}
-        </div>
-      {:else if total === 0n}
-        <div class="grid h-full place-items-center px-6 text-sm text-muted-foreground" role="status">
-          No log records.
-        </div>
-      {:else}
-        <div class="relative w-full" style={`height: ${$virtualizer.getTotalSize()}px;`}>
-          {#each $virtualizer.getVirtualItems() as item (item.key)}
-            {@const logicalIndex = segmentBase + BigInt(item.index)}
-            {@const row = rowsByOffset.get(logicalIndex.toString())}
-            <div
-              class="absolute left-0 top-0 grid w-full grid-cols-[12rem_7rem_minmax(0,1fr)] items-center border-b border-border/70 px-3 font-mono text-xs hover:bg-row-hover"
-              style={`height: ${item.size}px; transform: translateY(${item.start}px);`}
-              role="row"
-              aria-busy={row === undefined}
-            >
-              {#if row}
-                <span class="truncate pr-4 text-muted-foreground" role="cell" title={row.timestamp ?? ''}><time>{row.timestamp ?? ''}</time></span>
-                <span class="truncate pr-4 text-log-level" role="cell" title={row.severity ?? ''}>{row.severity ?? ''}</span>
-                <span class="truncate text-foreground" role="cell" title={row.message}>{row.message}</span>
-              {:else}
-                <span class="mr-8 h-2.5 animate-pulse rounded-sm bg-placeholder" role="cell" aria-hidden="true"></span>
-                <span class="mr-10 h-2.5 animate-pulse rounded-sm bg-placeholder" role="cell" aria-hidden="true"></span>
-                <span class="mr-24 h-2.5 animate-pulse rounded-sm bg-placeholder" role="cell" aria-hidden="true"></span>
-              {/if}
-            </div>
+  <div class="min-h-0 flex-1 overflow-x-auto">
+    <div
+      class="flex h-full min-w-full flex-col"
+      style={`width: max(100%, ${minimumTableWidth});`}
+      role="table"
+      aria-label="Log records"
+      aria-busy={viewer.pending !== undefined}
+      aria-colcount={columns.length}
+    >
+      <div
+        class="grid h-9 shrink-0 items-center border-b bg-table-header px-3 font-mono text-xs font-medium tracking-[0.04em] text-muted-foreground"
+        style={`grid-template-columns: ${gridTemplate};`}
+        role="rowgroup"
+      >
+        <div role="row" class="contents">
+          {#each columns as column, index (`${index}:${column}`)}
+            <div class="truncate pr-4" role="columnheader" title={column}>{column}</div>
           {/each}
         </div>
-      {/if}
+      </div>
+
+      <div bind:this={scrollElement} class="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden" role="rowgroup">
+        {#if !viewer.displayed}
+          <div class="grid h-full place-items-center px-6 text-sm text-muted-foreground" role="status">
+            {#if viewer.pending}
+              Preparing logs{viewer.pending.progress === undefined ? '…' : `… ${Math.round(viewer.pending.progress * 100)}%`}
+            {:else}
+              Connecting…
+            {/if}
+          </div>
+        {:else if total === 0n}
+          <div class="grid h-full place-items-center px-6 text-sm text-muted-foreground" role="status">
+            No log records.
+          </div>
+        {:else}
+          <div class="relative w-full" style={`height: ${$virtualizer.getTotalSize()}px;`}>
+            {#each $virtualizer.getVirtualItems() as item (item.key)}
+              {@const logicalIndex = segmentBase + BigInt(item.index)}
+              {@const row = rowsByOffset.get(logicalIndex.toString())}
+              <div
+                class="absolute left-0 top-0 grid w-full items-center border-b border-border/70 px-3 font-mono text-xs hover:bg-row-hover"
+                style={`height: ${item.size}px; transform: translateY(${item.start}px); grid-template-columns: ${gridTemplate};`}
+                role="row"
+                aria-busy={row === undefined}
+              >
+                {#if row}
+                  {#each columns as column, index (`${index}:${column}`)}
+                    {@const value = resolveColumnValue(row.fields, column)}
+                    {@const formatted = formatColumnValue(value)}
+                    <span
+                      class={`truncate pr-4 ${value === undefined ? 'text-muted-foreground/70' : 'text-foreground'}`}
+                      role="cell"
+                      title={value === undefined ? 'Not present' : formatted}
+                      aria-label={value === undefined ? `${column}: not present` : undefined}
+                    >{formatted}</span>
+                  {/each}
+                {:else}
+                  {#each columns as _, index (index)}
+                    <span class="mr-8 h-2.5 animate-pulse rounded-sm bg-placeholder" role="cell" aria-hidden="true"></span>
+                  {/each}
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
     </div>
   </div>
 </section>

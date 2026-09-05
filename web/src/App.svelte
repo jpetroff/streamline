@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { DEFAULT_COLUMNS } from '$lib/columns';
+  import ColumnSidebar from '$lib/components/ColumnSidebar.svelte';
   import RawOutput from '$lib/components/RawOutput.svelte';
   import VirtualLogTable from '$lib/components/VirtualLogTable.svelte';
   import { ViewerController } from '$lib/transport/viewer-controller';
@@ -8,6 +10,7 @@
   const controller = new ViewerController();
   let viewer = $state<ViewerState>(controller.state);
   let source = $state('stdin');
+  let columns = $state<string[]>([...DEFAULT_COLUMNS]);
 
   // Own the controller for exactly the lifetime of the root Svelte component.
   onMount(() => {
@@ -25,7 +28,7 @@
   <meta name="description" content="Local streaming log viewer" />
 </svelte:head>
 
-<div class="grid h-full grid-cols-[14rem_minmax(0,1fr)] grid-rows-[3rem_minmax(0,1fr)] bg-background text-foreground">
+<div class="grid h-full grid-cols-[18rem_minmax(0,1fr)] grid-rows-[3rem_minmax(0,1fr)] bg-background text-foreground">
   <header class="col-span-2 flex items-center border-b bg-shell px-3" aria-label="Application toolbar">
     <label for="input-source" class="sr-only">Input source</label>
     <select
@@ -39,7 +42,9 @@
       <option value="command" disabled>command</option>
     </select>
   </header>
-  <aside class="border-r bg-sidebar" aria-label="Sidebar"></aside>
+  <aside class="min-h-0 border-r bg-sidebar" aria-label="Sidebar">
+    <ColumnSidebar {viewer} appliedColumns={columns} onApply={next => { columns = next; }} />
+  </aside>
   <main class="flex min-h-0 min-w-0 flex-col overflow-hidden" aria-label="Streamline">
     {#if viewer.error}
       <div class="shrink-0 border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
@@ -60,7 +65,7 @@
       {:else if viewer.session.inputKind === 'raw'}
         <RawOutput {viewer} {controller} />
       {:else}
-        <VirtualLogTable {viewer} {controller} />
+        <VirtualLogTable {viewer} {controller} {columns} />
       {/if}
     </div>
   </main>
