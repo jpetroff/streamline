@@ -13,6 +13,8 @@
     onClose: () => void;
   } = $props();
 
+  let fullEntry = $derived(formatDetailColumnValue(row.fields ?? row.message));
+
   function handleKeydown(event: KeyboardEvent) {
     if (event.key !== 'Escape') return;
     event.preventDefault();
@@ -64,5 +66,18 @@
         </div>
       {/each}
     </dl>
+
+    <section class="mt-5 border-t pt-4" aria-labelledby="full-entry-heading">
+      <h3 id="full-entry-heading" class="text-sm font-semibold">Full log entry</h3>
+      <div class="mt-2 overflow-hidden rounded-md border bg-background">
+        {#if fullEntry.kind === 'json'}
+          <pre class="overflow-x-auto p-3 font-mono text-xs leading-5 text-foreground">{fullEntry.text}</pre>
+        {:else}
+          <div class="whitespace-pre-wrap break-words px-3 py-2 font-mono text-xs leading-5 text-foreground">
+            {fullEntry.text}
+          </div>
+        {/if}
+      </div>
+    </section>
   </div>
 </aside>
