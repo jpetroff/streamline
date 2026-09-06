@@ -54,7 +54,8 @@
   <div class="shrink-0">
     <h2 class="text-sm font-semibold">Columns</h2>
     <p id="columns-help" class="mt-1 text-xs leading-5 text-muted-foreground">
-      Enter one JSON field per line. Use dot notation for nested fields, such as <code>request.host</code>.
+      Enter one field per line. <code>timestamp</code>, <code>severity</code>, and <code>message</code> use normalized values;
+      dot notation selects nested JSON fields such as <code>request.host</code>.
     </p>
 
     <div class="mt-3 flex h-40 overflow-hidden rounded-md border border-input bg-background font-mono text-xs leading-5 focus-within:ring-2 focus-within:ring-ring">

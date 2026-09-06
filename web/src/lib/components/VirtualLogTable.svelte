@@ -2,7 +2,14 @@
   import { get } from 'svelte/store';
   import { tick } from 'svelte';
   import { createVirtualizer } from '@tanstack/svelte-virtual';
-  import { formatColumnValue, resolveColumnValue } from '$lib/columns';
+  import {
+    DATE_FORMAT_OPTIONS,
+    formatColumnValue,
+    isDateColumnPath,
+    resolveRowColumnValue,
+    type ColumnConfig,
+    type DateDisplayFormat,
+  } from '$lib/columns';
   import type { ViewerController } from '$lib/transport/viewer-controller';
   import type { LogRow, RowPage } from '$lib/transport/types';
   import type { ViewerState } from '$lib/transport/viewer-state';
@@ -20,12 +27,14 @@
     viewer,
     controller,
     columns,
+    onDateFormatChange,
     selectedRowId,
     onOpenDetails,
   }: {
     viewer: ViewerState;
     controller: ViewerController;
-    columns: readonly string[];
+    columns: readonly ColumnConfig[];
+    onDateFormatChange: (index: number, format: DateDisplayFormat) => void;
     selectedRowId?: string;
     onOpenDetails: (row: LogRow) => void;
   } = $props();
@@ -200,8 +209,26 @@
         role="rowgroup"
       >
         <div role="row" class="contents">
-          {#each columns as column, index (`${index}:${column}`)}
-            <div class="truncate pr-4" role="columnheader" title={column}>{column}</div>
+          {#each columns as column, index (`${index}:${column.path}`)}
+            <div class="flex min-w-0 items-center gap-2 pr-4" role="columnheader">
+              <span class="min-w-0 flex-1 truncate" title={column.path}>{column.path}</span>
+              {#if isDateColumnPath(column.path)}
+                <label class="shrink-0">
+                  <span class="sr-only">Date display for {column.path}</span>
+                  <select
+                    value={column.dateFormat}
+                    onchange={event => onDateFormatChange(index, event.currentTarget.value as DateDisplayFormat)}
+                    aria-label={`Date display for ${column.path}`}
+                    title="Date display format"
+                    class="h-6 max-w-24 rounded border border-input bg-background px-1 font-sans text-[0.6875rem] font-normal tracking-normal text-foreground outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    {#each DATE_FORMAT_OPTIONS as option}
+                      <option value={option.value}>{option.label}</option>
+                    {/each}
+                  </select>
+                </label>
+              {/if}
+            </div>
           {/each}
         </div>
       </div>
@@ -238,14 +265,14 @@
                 onkeydown={event => handleRowKeydown(event, row)}
               >
                 {#if row}
-                  {#each columns as column, index (`${index}:${column}`)}
-                    {@const value = resolveColumnValue(row.fields, column)}
-                    {@const formatted = formatColumnValue(value)}
+                  {#each columns as column, index (`${index}:${column.path}`)}
+                    {@const value = resolveRowColumnValue(row, column.path)}
+                    {@const formatted = formatColumnValue(value, column.dateFormat)}
                     <span
                       class={`truncate pr-4 ${value === undefined ? 'text-muted-foreground/70' : 'text-foreground'}`}
                       role="cell"
                       title={value === undefined ? 'Not present' : formatted}
-                      aria-label={value === undefined ? `${column}: not present` : undefined}
+                      aria-label={value === undefined ? `${column.path}: not present` : undefined}
                     >{formatted}</span>
                   {/each}
                 {:else}

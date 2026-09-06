@@ -1,13 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import {
   ABSENT_COLUMN_TEXT,
+  configureColumns,
   findSampleFields,
   formatColumnValue,
   formatDetailColumnValue,
+  isDateColumnPath,
   parseColumnDraft,
   resolveColumnValue,
+  resolveRowColumnValue,
 } from '../src/lib/columns';
-import type { JSONValue, RowPage, Snapshot } from '../src/lib/transport/types';
+import type { JSONValue, LogRow, RowPage, Snapshot } from '../src/lib/transport/types';
 
 const snapshot = (generationId: string): Snapshot => ({
   sessionId: 'session', generationId, queryId: 'query', revision: '1',
@@ -23,6 +26,25 @@ describe('column draft parsing', () => {
 
   test('returns no usable columns for whitespace-only input', () => {
     expect(parseColumnDraft(' \n\t\n')).toEqual([]);
+  });
+
+  test('retains date formats by path when configured columns are reordered', () => {
+    const configured = configureColumns(['timestamp', 'timestamp', 'message']);
+    configured[0].dateFormat = 'iso';
+    configured[1].dateFormat = 'time';
+    expect(configureColumns(['message', 'timestamp', 'timestamp', 'request.at'], configured)).toEqual([
+      { path: 'message', dateFormat: 'original' },
+      { path: 'timestamp', dateFormat: 'iso' },
+      { path: 'timestamp', dateFormat: 'time' },
+      { path: 'request.at', dateFormat: 'original' },
+    ]);
+  });
+
+  test('recognizes conventional date paths without matching unrelated suffixes', () => {
+    expect(isDateColumnPath('timestamp')).toBe(true);
+    expect(isDateColumnPath('request.created_at')).toBe(true);
+    expect(isDateColumnPath('eventTime')).toBe(true);
+    expect(isDateColumnPath('update')).toBe(false);
   });
 });
 
@@ -57,6 +79,36 @@ describe('column value lookup and formatting', () => {
     expect(formatColumnValue({ host: 'example.test' })).toBe('{"host":"example.test"}');
     expect(formatColumnValue(['one', 2, null])).toBe('["one",2,null]');
     expect(formatColumnValue(undefined)).toBe(ABSENT_COLUMN_TEXT);
+  });
+
+  test('resolves normalized row fields before the original JSON', () => {
+    const row: LogRow = {
+      id: '1',
+      timestamp: '2026-09-05T12:34:56Z',
+      severity: 'warning',
+      message: 'normalized message',
+      fields: { timestamp: 1788611696, severity: 'WARN', message: 'source message' },
+      sourceFormat: 'json',
+    };
+    expect(resolveRowColumnValue(row, 'timestamp')).toBe('2026-09-05T12:34:56Z');
+    expect(resolveRowColumnValue(row, 'severity')).toBe('warning');
+    expect(resolveRowColumnValue(row, 'message')).toBe('normalized message');
+    expect(resolveRowColumnValue(row, 'missing')).toBeUndefined();
+  });
+
+  test('falls back to the original timestamp when normalization did not recognize it', () => {
+    const row: LogRow = {
+      id: '1', message: 'invalid timestamp', fields: { timestamp: 'last Tuesday' }, sourceFormat: 'json',
+    };
+    expect(resolveRowColumnValue(row, 'timestamp')).toBe('last Tuesday');
+  });
+
+  test('formats ISO strings and Unix timestamps as dates with safe invalid-value fallback', () => {
+    expect(formatColumnValue('2026-09-05T12:34:56-04:00', 'iso')).toBe('2026-09-05T16:34:56.000Z');
+    expect(formatColumnValue(1788611696, 'iso')).toBe('2026-09-05T12:34:56.000Z');
+    expect(formatColumnValue('2026-09-05T12:34:56Z', 'date', { locales: 'en-US', timeZone: 'UTC' }))
+      .toBe('Sep 5, 2026');
+    expect(formatColumnValue('not-a-date', 'local')).toBe('not-a-date');
   });
 
   test('renders expanded structured values for row details', () => {

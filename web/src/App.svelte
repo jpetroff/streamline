@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { DEFAULT_COLUMNS } from '$lib/columns';
+  import { configureColumns, DEFAULT_COLUMNS, type DateDisplayFormat } from '$lib/columns';
   import ColumnSidebar from '$lib/components/ColumnSidebar.svelte';
   import RawOutput from '$lib/components/RawOutput.svelte';
   import RowDetailPanel from '$lib/components/RowDetailPanel.svelte';
@@ -18,7 +18,8 @@
   const controller = new ViewerController();
   let viewer = $state<ViewerState>(controller.state);
   let source = $state('stdin');
-  let columns = $state<string[]>([...DEFAULT_COLUMNS]);
+  let columns = $state(configureColumns(DEFAULT_COLUMNS));
+  let columnPaths = $derived(columns.map(column => column.path));
   let selectedRow = $state<SelectedRow>();
 
   // Own the controller for exactly the lifetime of the root Svelte component.
@@ -49,6 +50,16 @@
     if (!displayed) return;
     selectedRow = { row, queryId: displayed.queryId, generationId: displayed.snapshot.generationId };
   }
+
+  function applyColumns(paths: string[]) {
+    columns = configureColumns(paths, columns);
+  }
+
+  function setDateFormat(index: number, dateFormat: DateDisplayFormat) {
+    columns = columns.map((column, columnIndex) => (
+      columnIndex === index ? { ...column, dateFormat } : column
+    ));
+  }
 </script>
 
 <svelte:head>
@@ -71,7 +82,7 @@
     </select>
   </header>
   <aside class="min-h-0 border-r bg-sidebar" aria-label="Sidebar">
-    <ColumnSidebar {viewer} appliedColumns={columns} onApply={next => { columns = next; }} />
+    <ColumnSidebar {viewer} appliedColumns={columnPaths} onApply={applyColumns} />
   </aside>
   <main class="flex min-h-0 min-w-0 flex-col overflow-hidden" aria-label="Streamline">
     {#if viewer.error}
@@ -99,6 +110,7 @@
               {viewer}
               {controller}
               {columns}
+              onDateFormatChange={setDateFormat}
               selectedRowId={selectedRow?.row.id}
               onOpenDetails={openDetails}
             />

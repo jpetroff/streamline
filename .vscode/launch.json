@@ -39,7 +39,8 @@
       "cwd": "${workspaceFolder}",
       "buildFlags": "-tags=dev",
       "args": ["-port", "8080"],
-      "stdinFrom": "${workspaceFolder}/dataset/caddy_logs_full.txt",
+      // "stdinFrom": "${workspaceFolder}/dataset/caddy_logs_full.txt",
+      "stdinFrom": "${workspaceFolder}/dataset/journald_logs_plain.txt",
       // "stdinFrom": "${workspaceFolder}/internal/parse/testdata/journald.jsonl",
       "console": "integratedTerminal",
       "showLog": false

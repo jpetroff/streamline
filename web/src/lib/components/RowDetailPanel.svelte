@@ -1,6 +1,6 @@
 <script lang="ts">
   import { X } from '@lucide/svelte';
-  import { formatDetailColumnValue, resolveColumnValue } from '$lib/columns';
+  import { formatColumnValue, formatDetailColumnValue, resolveRowColumnValue, type ColumnConfig } from '$lib/columns';
   import type { LogRow } from '$lib/transport/types';
 
   let {
@@ -9,7 +9,7 @@
     onClose,
   }: {
     row: LogRow;
-    columns: readonly string[];
+    columns: readonly ColumnConfig[];
     onClose: () => void;
   } = $props();
 
@@ -46,12 +46,14 @@
 
   <div class="min-h-0 flex-1 overflow-y-auto p-3">
     <dl class="space-y-3">
-      {#each columns as column, index (`${index}:${column}`)}
-        {@const value = resolveColumnValue(row.fields, column)}
-        {@const formatted = formatDetailColumnValue(value)}
+      {#each columns as column, index (`${index}:${column.path}`)}
+        {@const value = resolveRowColumnValue(row, column.path)}
+        {@const formatted = column.dateFormat === 'original'
+          ? formatDetailColumnValue(value)
+          : { text: formatColumnValue(value, column.dateFormat), kind: value === undefined ? 'absent' : 'scalar' }}
         <div class="overflow-hidden rounded-md border bg-background">
-          <dt class="border-b bg-muted/30 px-3 py-2 font-mono text-xs font-medium text-muted-foreground" title={column}>
-            {column}
+          <dt class="border-b bg-muted/30 px-3 py-2 font-mono text-xs font-medium text-muted-foreground" title={column.path}>
+            {column.path}
           </dt>
           <dd class="m-0">
             {#if formatted.kind === 'json'}
@@ -59,7 +61,7 @@
             {:else}
               <div
                 class={`whitespace-pre-wrap break-words px-3 py-2 font-mono text-xs leading-5 ${formatted.kind === 'absent' ? 'text-muted-foreground/70' : 'text-foreground'}`}
-                aria-label={formatted.kind === 'absent' ? `${column}: not present` : undefined}
+                aria-label={formatted.kind === 'absent' ? `${column.path}: not present` : undefined}
               >{formatted.text}</div>
             {/if}
           </dd>
