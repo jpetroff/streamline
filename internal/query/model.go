@@ -53,9 +53,10 @@ type Session struct {
 }
 
 type APIError struct {
-	Code       string      `json:"code"`
-	Message    string      `json:"message"`
-	LineErrors []LineError `json:"lineErrors,omitempty"`
+	Code         string        `json:"code"`
+	Message      string        `json:"message"`
+	LineErrors   []LineError   `json:"lineErrors,omitempty"`
+	FilterErrors []FilterError `json:"filterErrors,omitempty"`
 }
 
 // Error lets APIError cross service boundaries as a standard Go error.
@@ -64,7 +65,6 @@ func (e *APIError) Error() string { return e.Message }
 var (
 	ErrNotFound          = &APIError{Code: "query_not_found", Message: "query does not exist or has expired"}
 	ErrSnapshotGone      = &APIError{Code: "snapshot_invalid", Message: "snapshot is not available"}
-	ErrQueryEngine       = &APIError{Code: "query_engine_unavailable", Message: "filtering is not available until the query engine is connected"}
 	ErrInvalidRequest    = &APIError{Code: "invalid_request", Message: "request is invalid"}
 	ErrRawUnavailable    = &APIError{Code: "raw_unavailable", Message: "raw stdin output is not available"}
 	ErrGenerationChanged = &APIError{Code: "generation_changed", Message: "the requested input generation is no longer current"}
@@ -121,7 +121,7 @@ type RawChunkPage struct {
 }
 
 type CreateRequest struct {
-	Filter string      `json:"filter"`
+	Filter FilterList  `json:"filter"`
 	Sort   Sort        `json:"sort"`
 	Search *SearchSpec `json:"search,omitempty"`
 }
@@ -150,23 +150,13 @@ type Service interface {
 type Predicate func(Record) bool
 
 type Compiler interface {
-	Compile(string) (Predicate, error)
+	Compile([]FilterSpec) (Predicate, error)
 }
 
-type CompilerFunc func(string) (Predicate, error)
+type CompilerFunc func([]FilterSpec) (Predicate, error)
 
 // Compile adapts a function into the query compiler interface.
-func (f CompilerFunc) Compile(expression string) (Predicate, error) { return f(expression) }
-
-type MatchEmptyCompiler struct{}
-
-// Compile accepts the production scaffold's unfiltered query and rejects filters until the shared engine is connected.
-func (MatchEmptyCompiler) Compile(expression string) (Predicate, error) {
-	if expression != "" {
-		return nil, ErrQueryEngine
-	}
-	return func(Record) bool { return true }, nil
-}
+func (f CompilerFunc) Compile(expression []FilterSpec) (Predicate, error) { return f(expression) }
 
 // AsAPIError preserves public domain errors and masks unexpected internal failures.
 func AsAPIError(err error) *APIError {

@@ -63,3 +63,18 @@ have an error bullet with details on hover or keyboard focus. Browser syntax
 validation runs immediately; Go validates again on Apply and can reject JS-only
 features such as lookaround and backreferences. Previous results stay visible
 if a search is rejected. Raw-output search and saved searches are not included.
+
+### Field filters
+
+The sidebar starts with no filters. Add conditions in the builder, or use **Import JSON** to replace the draft with a saved array. **Apply** updates the results; **Clear all** followed by **Apply** removes the filters. **Copy JSON** copies the valid draft for reuse. The `(?)` buttons beside Columns and Filters show a sample of the original JSON.
+
+```json
+[
+  { "field": "level", "op": "eq", "value": "error" },
+  { "field": "duration", "op": "gte", "value": 100 }
+]
+```
+
+Conditions combine with AND in declaration order, before general search. Field names are case-sensitive dotted object paths into the original JSON, with no array indexing. `eq`, `contains`, and `regex` take string operands and match scalar text without case sensitivity. Missing fields, objects, and arrays do not match. Regex uses the same browser syntax checks and authoritative Go validation as search; each value is one expression, including embedded newlines.
+
+`gt`, `gte`, `lt`, and `lte` take JSON number operands and match only numeric source fields, excluding numeric-looking strings. Fields do not need to appear in the sample to be used. For HTTP clients, `POST /api/v1/queries` now accepts the array as its `filter` property alongside `sort` and `search`; the former string expression is no longer accepted. Validation failures return `invalid_filter` with `filterErrors` identifying the one-based filter `index`, `property`, and `message` (index `0` identifies an invalid top-level array).

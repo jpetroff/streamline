@@ -83,7 +83,7 @@
     </select>
   </header>
   <aside class="min-h-0 border-r bg-sidebar" aria-label="Sidebar">
-    <ColumnSidebar {viewer} appliedColumns={columnPaths} onApply={applyColumns} />
+    <ColumnSidebar {viewer} appliedColumns={columnPaths} onApply={applyColumns} onApplyFilters={filters => controller.setFilters(filters)} />
   </aside>
   <main class="flex min-h-0 min-w-0 flex-col overflow-hidden" aria-label="Streamline">
     {#if viewer.error}
@@ -126,7 +126,7 @@
       <SearchEditor
         applied={viewer.displayed?.search}
         pending={viewer.pending !== undefined}
-        onApply={search => controller.setQuery(viewer.displayed?.filter ?? '', viewer.displayed?.sort ?? 'input', search)}
+        onApply={search => controller.setSearch(search)}
       />
     {/if}
   </main>

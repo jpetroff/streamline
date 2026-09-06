@@ -50,7 +50,7 @@ func TestQueryHTTPContractAndStableSnapshotPage(t *testing.T) {
 	server := httptest.NewServer(NewHandler(http.NotFoundHandler(), service))
 	t.Cleanup(server.Close)
 
-	body := bytes.NewBufferString(`{"filter":"","sort":"input"}`)
+	body := bytes.NewBufferString(`{"filter":[],"sort":"input"}`)
 	response, err := http.Post(server.URL+"/api/v1/queries", "application/json", body)
 	if err != nil {
 		t.Fatal(err)
@@ -193,7 +193,7 @@ func TestSearchHTTPValidationAndMatching(t *testing.T) {
 		t.Fatalf("response %d %s", invalid.Code, invalid.Body)
 	}
 	valid := httptest.NewRecorder()
-	handler.ServeHTTP(valid, httptest.NewRequest(http.MethodPost, "/api/v1/queries", strings.NewReader(`{"filter":"","sort":"input","search":{"text":"TIMEOUT\napi","operator":"and"}}`)))
+	handler.ServeHTTP(valid, httptest.NewRequest(http.MethodPost, "/api/v1/queries", strings.NewReader(`{"filter":[],"sort":"input","search":{"text":"TIMEOUT\napi","operator":"and"}}`)))
 	if valid.Code != 202 {
 		t.Fatalf("response %d %s", valid.Code, valid.Body)
 	}
@@ -207,4 +207,55 @@ func TestSearchHTTPValidationAndMatching(t *testing.T) {
 	if ready.Snapshot.MatchedCount != "1" {
 		t.Fatalf("snapshot %#v", ready.Snapshot)
 	}
+}
+
+func TestFilterHTTPValidationAndNumericDecoding(t *testing.T) {
+	service := query.NewMemoryService(nil)
+	handler := NewHandler(http.NotFoundHandler(), service)
+	for _, body := range []string{
+		`{"filter":null}`, `{"filter":"old expression"}`, `{"filter":{}}`,
+		`{"filter":[{"field":"n","op":"gt","value":"10"}]}`,
+		`{"filter":[{"field":"x","op":"eq","value":"ok"},{"field":"x","op":"regex","value":"(?=x)"}]}`,
+		`{"filter":[{"field":"x","op":"eq","value":"ok","extra":true}]}`,
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/queries", strings.NewReader(body)))
+		var envelope struct {
+			Error query.APIError `json:"error"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		if response.Code != 400 || envelope.Error.Code != "invalid_filter" || len(envelope.Error.FilterErrors) == 0 {
+			t.Fatalf("response = %d %s", response.Code, response.Body.String())
+		}
+		if strings.Contains(body, "(?=x)") && (envelope.Error.FilterErrors[0].Index != 2 || envelope.Error.FilterErrors[0].Property != "value") {
+			t.Fatalf("wrong error position: %#v", envelope.Error.FilterErrors)
+		}
+	}
+	service.Append([]query.Record{{Fields: map[string]any{"n": json.Number("12")}}, {Fields: map[string]any{"n": "12"}}})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/queries", strings.NewReader(`{"filter":[{"field":"n","op":"gt","value":10}],"sort":"input"}`)))
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("response = %d %s", response.Code, response.Body.String())
+	}
+	var created query.State
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		state, err := service.Get(context.Background(), created.QueryID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.Status == query.StatusReady {
+			if state.Snapshot.MatchedCount != "1" {
+				t.Fatalf("numeric matches = %s", state.Snapshot.MatchedCount)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("query did not become ready")
 }

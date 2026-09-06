@@ -88,6 +88,10 @@ func (h handler) createQuery(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
+		if apiErr := query.AsAPIError(err); apiErr.Code == "invalid_filter" {
+			writeServiceError(w, err)
+			return
+		}
 		writeError(w, http.StatusBadRequest, &query.APIError{Code: "invalid_json", Message: "request body must be valid query JSON"})
 		return
 	}
@@ -221,8 +225,6 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	switch apiErr.Code {
 	case query.ErrNotFound.Code:
 		status = http.StatusNotFound
-	case query.ErrQueryEngine.Code:
-		status = http.StatusNotImplemented
 	case query.ErrRawUnavailable.Code, query.ErrGenerationChanged.Code:
 		status = http.StatusConflict
 	case "internal_error":

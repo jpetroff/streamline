@@ -144,10 +144,12 @@ func TestSearchCompositionShortCircuitsInOrder(t *testing.T) {
 }
 
 func TestSearchFiltersBeforePaginationAndRetainsSnapshots(t *testing.T) {
-	service := NewMemoryService(CompilerFunc(func(string) (Predicate, error) { return func(r Record) bool { return r.Severity == "error" }, nil }))
+	service := NewMemoryService(CompilerFunc(func([]FilterSpec) (Predicate, error) {
+		return func(r Record) bool { return r.Severity == "error" }, nil
+	}))
 	service.Append([]Record{{Severity: "error", Message: "alpha"}, {Severity: "info", Message: "alpha beta"}, {Severity: "error", Message: "alpha", Fields: map[string]any{"hidden": "beta"}}, {Severity: "error", Message: "beta"}})
 	spec := &SearchSpec{Text: "alpha\nbeta", Operator: "and"}
-	created, err := service.Create(context.Background(), CreateRequest{Filter: "permanent", Search: spec})
+	created, err := service.Create(context.Background(), CreateRequest{Filter: []FilterSpec{{Field: "level", Op: "eq", Value: "permanent"}}, Search: spec})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +179,7 @@ func TestSearchFiltersBeforePaginationAndRetainsSnapshots(t *testing.T) {
 			t.Fatalf("page = %#v", page)
 		}
 	}
-	cleared, err := service.Create(context.Background(), CreateRequest{Filter: "permanent", Search: &SearchSpec{}})
+	cleared, err := service.Create(context.Background(), CreateRequest{Filter: []FilterSpec{{Field: "level", Op: "eq", Value: "permanent"}}, Search: &SearchSpec{}})
 	if err != nil {
 		t.Fatal(err)
 	}

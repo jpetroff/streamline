@@ -1,12 +1,14 @@
+import { cloneFilters } from '$lib/filters';
 import { pageOffsetsForRange, PAGE_SIZE } from '$lib/virtual-window';
 import { HTTPQueryAPI, TransportError, type EventConnection, type QueryAPI } from './api';
 import { PageCache } from './page-cache';
-import type { APIErrorBody, QueryEvent, QuerySort, QuerySpec, SearchSpec, QueryState, RowPage, Session, Snapshot } from './types';
+import type { APIErrorBody, FilterSpec, QueryEvent, QuerySort, QuerySpec, SearchSpec, QueryState, RowPage, Session, Snapshot } from './types';
 import { reduceViewer, type ViewerState } from './viewer-state';
 
 /** Coordinates query lifecycle, SSE notifications, guarded page loading, and follow state. */
 export class ViewerController {
   state: ViewerState = { following: true, needsRefresh: false };
+  private requestedSpec: QuerySpec = { filter: [], sort: 'input' };
   private intent = 0;
   private rangeRequest = 0;
   private abort?: AbortController;
@@ -43,18 +45,28 @@ export class ViewerController {
       if (session.inputKind === 'raw') {
         await this.activateRaw(session);
       } else {
-        await this.setQuery('');
+        await this.setQuery([]);
       }
     } catch (error) {
       if (this.current(intent) && !isAbort(error)) this.dispatch({ type: 'failed', error: errorBody(error) });
     }
   }
 
+  /** Updates one editor while retaining the latest submitted options from the other. */
+  setFilters(filter: readonly FilterSpec[]) {
+    return this.setQuery(filter, this.requestedSpec.sort, this.requestedSpec.search);
+  }
+
+  setSearch(search: SearchSpec) {
+    return this.setQuery(this.requestedSpec.filter, this.requestedSpec.sort, search);
+  }
+
   /** Builds a replacement query while preserving the current display until its first page is ready. */
-  async setQuery(filter: string, sort: QuerySort = 'input', search?: SearchSpec): Promise<APIErrorBody | undefined> {
+  async setQuery(filter: readonly FilterSpec[], sort: QuerySort = 'input', search?: SearchSpec): Promise<APIErrorBody | undefined> {
     // Copy caller-owned options before asynchronous work; recovery must replay
     // the confirmed query, never whatever the editor currently contains.
-    const spec: QuerySpec = { filter, sort, search: search ? { ...search } : undefined };
+    const spec: QuerySpec = { filter: cloneFilters(filter), sort, search: search ? { ...search } : undefined };
+    this.requestedSpec = spec;
     const intent = ++this.intent;
     this.rangeRequest++;
     this.activeRange = undefined;
@@ -313,7 +325,11 @@ export class ViewerController {
   /** Reconnects the previous displayed query after a replacement command fails. */
   private restoreDisplayed(intent: number) {
     const displayed = this.state.displayed;
-    if (!displayed || !this.current(intent)) return;
+    if (!this.current(intent)) return;
+    this.requestedSpec = displayed ? { filter: cloneFilters(displayed.filter), sort: displayed.sort, search: displayed.search ? { ...displayed.search } : undefined } : { filter: [], sort: 'input' };
+    this.pendingEvents?.close();
+    this.pendingEvents = undefined;
+    if (!displayed) return;
     this.activeEvents?.close();
     this.activeEvents = this.api.events(displayed.queryId, event => void this.receive(intent, displayed, event), () => void this.resync(intent, displayed, displayed.queryId));
     void this.resync(intent, displayed, displayed.queryId);
@@ -344,5 +360,5 @@ export class ViewerController {
 function isAbort(error: unknown) { return error instanceof DOMException && error.name === 'AbortError'; }
 /** Converts unknown client failures into the UI error contract. */
 function errorBody(error: unknown): APIErrorBody {
-  return error instanceof TransportError ? { code: error.code, message: error.message, lineErrors: error.lineErrors } : { code: 'transport_error', message: error instanceof Error ? error.message : 'Transport failed' };
+  return error instanceof TransportError ? { code: error.code, message: error.message, lineErrors: error.lineErrors, filterErrors: error.filterErrors } : { code: 'transport_error', message: error instanceof Error ? error.message : 'Transport failed' };
 }

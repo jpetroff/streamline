@@ -20,11 +20,11 @@ describe('viewer state', () => {
     const initial: ViewerState = {
       following: true, needsRefresh: false,
       displayed: {
-        queryId: 'old', filter: '', sort: 'input', snapshot: descriptor,
+        queryId: 'old', filter: [], sort: 'input', snapshot: descriptor,
         pages: [page(descriptor, '0', [{ id: '1', message: 'old', sourceFormat: 'text' }])],
       },
     };
-    const pending = reduceViewer(initial, { type: 'pending', sort: 'input', queryId: 'new', filter: 'error' });
+    const pending = reduceViewer(initial, { type: 'pending', sort: 'input', queryId: 'new', filter: [{ field: 'level', op: 'eq' as const, value: 'error' }] });
     expect(pending.displayed?.pages[0].rows[0].message).toBe('old');
     const failed = reduceViewer(pending, { type: 'failed', error: { code: 'invalid_filter', message: 'bad filter' } });
     expect(failed.displayed?.queryId).toBe('old');
@@ -36,7 +36,7 @@ describe('viewer state', () => {
     const ready = reduceViewer({ following: true, needsRefresh: false }, {
       type: 'replace',
       query: {
-        queryId: 'q', filter: '', sort: 'input', snapshot: first,
+        queryId: 'q', filter: [], sort: 'input', snapshot: first,
         pages: [page(first, '0', [{ id: '1', message: 'first', sourceFormat: 'text' }])],
       },
     });
@@ -56,7 +56,7 @@ describe('viewer state', () => {
     const state: ViewerState = {
       following: false,
       needsRefresh: false,
-      displayed: { queryId: 'q', filter: '', sort: 'input', snapshot: current, pages: [] },
+      displayed: { queryId: 'q', filter: [], sort: 'input', snapshot: current, pages: [] },
     };
     const stale = snapshot('q', '1', '1');
     const unchanged = reduceViewer(state, {

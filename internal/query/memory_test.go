@@ -10,7 +10,7 @@ import (
 
 type blockingCompiler struct{ entered, release chan struct{} }
 
-func (c blockingCompiler) Compile(string) (Predicate, error) {
+func (c blockingCompiler) Compile([]FilterSpec) (Predicate, error) {
 	return func(Record) bool {
 		select {
 		case c.entered <- struct{}{}:
@@ -122,14 +122,14 @@ func TestSlowSubscriberReceivesOnlyLatestCoalescedState(t *testing.T) {
 }
 
 func TestCompilerOwnsFilterExpressionSemantics(t *testing.T) {
-	service := NewMemoryService(CompilerFunc(func(expression string) (Predicate, error) {
-		if expression != "errors" {
-			t.Fatalf("expression = %q", expression)
+	service := NewMemoryService(CompilerFunc(func(expression []FilterSpec) (Predicate, error) {
+		if len(expression) != 1 || expression[0].Value != "errors" {
+			t.Fatalf("expression = %v", expression)
 		}
 		return func(record Record) bool { return record.Severity == "error" }, nil
 	}))
 	service.Append([]Record{{Severity: "info", Message: "ok"}, {Severity: "error", Message: "failed"}})
-	created, err := service.Create(context.Background(), CreateRequest{Filter: "errors"})
+	created, err := service.Create(context.Background(), CreateRequest{Filter: []FilterSpec{{Field: "level", Op: "eq", Value: "errors"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

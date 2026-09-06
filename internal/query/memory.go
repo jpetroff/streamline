@@ -61,7 +61,7 @@ func (s *subscription) Close() { s.once.Do(s.close) }
 // NewMemoryService creates a session-scoped in-memory query coordinator.
 func NewMemoryService(compiler Compiler) *MemoryService {
 	if compiler == nil {
-		compiler = MatchEmptyCompiler{}
+		compiler = TupleCompiler{}
 	}
 	return &MemoryService{
 		session:  Session{SessionID: randomID(), GenerationID: "1", InputStatus: InputStreaming, InputKind: InputPending},
@@ -122,8 +122,7 @@ func (s *MemoryService) Create(_ context.Context, request CreateRequest) (State,
 	if err != nil {
 		return State{}, err
 	}
-	// General search is always the final filtering factor. Future permanent
-	// predicates belong before it, so snapshots and pages index only final matches.
+	// General search follows ordered field filters, before snapshots and pagination.
 	predicate = allPredicates(predicate, search)
 
 	s.mu.Lock()
@@ -417,6 +416,7 @@ func cloneState(state State) State {
 	if state.Error != nil {
 		e := *state.Error
 		e.LineErrors = append([]LineError(nil), e.LineErrors...)
+		e.FilterErrors = append([]FilterError(nil), e.FilterErrors...)
 		copy.Error = &e
 	}
 	return copy

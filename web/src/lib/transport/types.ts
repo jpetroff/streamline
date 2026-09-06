@@ -28,7 +28,7 @@ export interface SearchSpec {
 
 /** Complete immutable query command, retained through reconnect and recovery. */
 export interface QuerySpec {
-  filter: string;
+  filter: FilterSpec[];
   sort: QuerySort;
   search?: SearchSpec;
 }
@@ -44,6 +44,7 @@ export interface APIErrorBody {
   code: string;
   message: string;
   lineErrors?: LineError[];
+  filterErrors?: FilterError[];
 }
 
 /** Identity and input state for one in-memory binary session. */
@@ -107,4 +108,15 @@ export interface QueryEvent {
   type: 'state' | 'progress' | 'snapshot' | 'input' | 'generation';
   state: QueryState;
   session: Session;
+}
+
+/** One ordered condition on an original JSON field. */
+export type FilterSpec =
+  | { field: string; op: 'eq' | 'contains' | 'regex'; value: string }
+  | { field: string; op: 'gt' | 'gte' | 'lt' | 'lte'; value: number };
+
+export interface FilterError {
+  index: number;
+  property: string;
+  message: string;
 }

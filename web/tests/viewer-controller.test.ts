@@ -25,7 +25,7 @@ class FakeAPI implements QueryAPI {
   create(spec: QuerySpec): Promise<QueryState> {
     this.specs.push(spec);
     const request = deferred<QueryState>();
-    this.creates.set(spec.filter, request);
+    this.creates.set(String(spec.filter[0]?.value ?? ''), request);
     return request.promise;
   }
   get(queryId: string): Promise<QueryState> { return Promise.resolve(ready(queryId)); }
@@ -89,8 +89,8 @@ async function settle() { await Promise.resolve(); await Promise.resolve(); awai
 test('a late response from a superseded filter cannot replace the current query', async () => {
   const api = new FakeAPI();
   const controller = new ViewerController(api);
-  const first = controller.setQuery('first');
-  const second = controller.setQuery('second');
+  const first = controller.setQuery([{ field: 'level', op: 'eq', value: 'first' }]);
+  const second = controller.setQuery([{ field: 'level', op: 'eq', value: 'second' }]);
   api.creates.get('second')!.resolve(ready('query-2'));
   await second;
   expect(controller.state.displayed?.queryId).toBe('query-2');
@@ -105,10 +105,10 @@ test('a late response from a superseded filter cannot replace the current query'
 test('the old display remains visible until a new query page is ready', async () => {
   const api = new FakeAPI();
   const controller = new ViewerController(api);
-  const initial = controller.setQuery('old');
+  const initial = controller.setQuery([{ field: 'level', op: 'eq', value: 'old' }]);
   api.creates.get('old')!.resolve(ready('old-query'));
   await initial;
-  const replacement = controller.setQuery('new');
+  const replacement = controller.setQuery([{ field: 'level', op: 'eq', value: 'new' }]);
   expect(controller.state.displayed?.queryId).toBe('old-query');
   api.creates.get('new')!.resolve(ready('new-query'));
   await replacement;
@@ -119,7 +119,7 @@ test('the old display remains visible until a new query page is ready', async ()
 test('viewport ranges load aligned pages with one page of prefetch', async () => {
   const api = new RangeAPI();
   const controller = new ViewerController(api);
-  await controller.setQuery('');
+  await controller.setQuery([]);
   expect(api.calls).toEqual([800n]);
 
   api.calls = [];
@@ -135,7 +135,7 @@ test('viewport ranges load aligned pages with one page of prefetch', async () =>
 test('identical viewport requests share the same in-flight page loads', async () => {
   const api = new RangeAPI();
   const controller = new ViewerController(api);
-  await controller.setQuery('');
+  await controller.setQuery([]);
   api.calls = [];
   api.deferredRows = true;
 
@@ -151,7 +151,7 @@ test('identical viewport requests share the same in-flight page loads', async ()
 test('a late viewport response cannot replace a newer visible range', async () => {
   const api = new RangeAPI();
   const controller = new ViewerController(api);
-  await controller.setQuery('');
+  await controller.setQuery([]);
   api.deferredRows = true;
 
   const older = controller.ensureRange(10n, 20n);
@@ -235,7 +235,7 @@ test('confirmed search is copied into pending and displayed query state', async 
   const api = new FakeAPI();
   const controller = new ViewerController(api);
   const search = { text: 'timeout\napi', mode: 'plain' as const, operator: 'and' as const };
-  const pending = controller.setQuery('permanent', 'input', search);
+  const pending = controller.setQuery([{ field: 'level', op: 'eq', value: 'permanent' }], 'input', search);
   search.text = 'unconfirmed edit';
   expect(api.specs[0].search?.text).toBe('timeout\napi');
   api.creates.get('permanent')!.resolve({ queryId: 'search-query', status: 'building' });
@@ -247,10 +247,10 @@ test('confirmed search is copied into pending and displayed query state', async 
 test('backend line errors preserve the old display and return diagnostics to the editor', async () => {
   const api = new FakeAPI();
   const controller = new ViewerController(api);
-  const initial = controller.setQuery('old', 'input', { text: 'old', mode: 'plain', operator: 'or' });
+  const initial = controller.setQuery([{ field: 'level', op: 'eq', value: 'old' }], 'input', { text: 'old', mode: 'plain', operator: 'or' });
   api.creates.get('old')!.resolve(ready('old-query'));
   await initial;
-  const replacement = controller.setQuery('new', 'input', { text: '(?=x)', mode: 'regexp', operator: 'or' });
+  const replacement = controller.setQuery([{ field: 'level', op: 'eq', value: 'new' }], 'input', { text: '(?=x)', mode: 'regexp', operator: 'or' });
   api.creates.get('new')!.reject(new TransportError('invalid_search', 'Unsupported expression', 400, [{ line: 1, message: 'lookaround unsupported' }]));
   const error = await replacement;
   expect(error?.lineErrors).toEqual([{ line: 1, message: 'lookaround unsupported' }]);
@@ -263,8 +263,8 @@ test('backend line errors preserve the old display and return diagnostics to the
 test('a superseded rejection cannot annotate or replace the latest search', async () => {
   const api = new FakeAPI();
   const controller = new ViewerController(api);
-  const first = controller.setQuery('first', 'input', { text: '(?=x)', mode: 'regexp', operator: 'or' });
-  const second = controller.setQuery('second', 'input', { text: 'ok', mode: 'plain', operator: 'and' });
+  const first = controller.setQuery([{ field: 'level', op: 'eq', value: 'first' }], 'input', { text: '(?=x)', mode: 'regexp', operator: 'or' });
+  const second = controller.setQuery([{ field: 'level', op: 'eq', value: 'second' }], 'input', { text: 'ok', mode: 'plain', operator: 'and' });
   api.creates.get('second')!.resolve(ready('second-query'));
   await second;
   api.creates.get('first')!.reject(new TransportError('invalid_search', 'Unsupported', 400, [{ line: 1, message: 'unsupported' }]));
@@ -291,7 +291,7 @@ test('generation changes and expired reconnects preserve every applied search op
     const api = new SearchRecoveryAPI();
     const controller = new ViewerController(api);
     const search = { text: 'timeout\napi', mode: 'regexp' as const, operator: 'and' as const };
-    const initial = controller.setQuery('permanent', 'input', search);
+    const initial = controller.setQuery([{ field: 'level', op: 'eq', value: 'permanent' }], 'input', search);
     api.creates.get('permanent')!.resolve(ready('old-query'));
     await initial;
     if (recovery === 'generation') {
@@ -302,9 +302,61 @@ test('generation changes and expired reconnects preserve every applied search op
     }
     await settle();
     expect(api.specs).toHaveLength(2);
-    expect(api.specs[1]).toEqual({ filter: 'permanent', sort: 'input', search });
+    expect(api.specs[1]).toEqual({ filter: [{ field: 'level', op: 'eq' as const, value: 'permanent' }], sort: 'input', search });
     api.creates.get('permanent')!.resolve(ready('replacement', '0'));
     await settle();
     controller.dispose();
   }
+});
+
+test('submitted filters own their array and tuples', async () => {
+  const api = new FakeAPI();
+  const controller = new ViewerController(api);
+  const filters: QuerySpec['filter'] = [{ field: 'level', op: 'eq', value: 'error' }];
+  const submission = controller.setFilters(filters);
+  filters[0].field = 'changed';
+  filters.push({ field: 'other', op: 'gt', value: 10 });
+  expect(api.specs[0].filter).toEqual([{ field: 'level', op: 'eq', value: 'error' }]);
+  api.creates.get('error')!.resolve(ready('filters'));
+  await submission;
+  expect(controller.state.displayed?.filter).toEqual(api.specs[0].filter);
+  controller.dispose();
+});
+
+test('overlapping search and filter submissions retain the latest counterpart in either order', async () => {
+  for (const firstEditor of ['filters', 'search']) {
+    const api = new FakeAPI();
+    const controller = new ViewerController(api);
+    const filter: QuerySpec['filter'] = [{ field: 'level', op: 'eq', value: 'error' }];
+    const search = { text: 'timeout', mode: 'plain' as const, operator: 'or' as const };
+    const first = firstEditor === 'filters' ? controller.setFilters(filter) : controller.setSearch(search);
+    const firstRequest = api.creates.get(firstEditor === 'filters' ? 'error' : '')!;
+    const second = firstEditor === 'filters' ? controller.setSearch(search) : controller.setFilters(filter);
+    expect(api.specs[1]).toEqual({ filter, search, sort: 'input' });
+    api.creates.get('error')!.resolve(ready('combined'));
+    await second;
+    firstRequest.resolve(ready('superseded'));
+    await first;
+    expect(controller.state.displayed?.filter).toEqual(filter);
+    expect(controller.state.displayed?.search).toEqual(search);
+    controller.dispose();
+  }
+});
+
+test('rejected filters preserve displayed results and roll back options used by the next search', async () => {
+  const api = new FakeAPI();
+  const controller = new ViewerController(api);
+  const initial = controller.setFilters([{ field: 'level', op: 'eq', value: 'old' }]);
+  api.creates.get('old')!.resolve(ready('old-query'));
+  await initial;
+  const replacement = controller.setFilters([{ field: 'name', op: 'regex', value: '(?=x)' }]);
+  const filterErrors = [{ index: 1, property: 'value', message: 'Unsupported expression' }];
+  api.creates.get('(?=x)')!.reject(new TransportError('invalid_filter', 'Invalid filter', 400, undefined, filterErrors));
+  expect((await replacement)?.filterErrors).toEqual(filterErrors);
+  expect(controller.state.displayed?.queryId).toBe('old-query');
+  const search = controller.setSearch({ text: 'timeout', mode: 'plain', operator: 'or' });
+  expect(api.specs.at(-1)?.filter).toEqual([{ field: 'level', op: 'eq', value: 'old' }]);
+  api.creates.get('old')!.resolve(ready('new-search'));
+  await search;
+  controller.dispose();
 });

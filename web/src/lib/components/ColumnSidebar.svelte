@@ -1,17 +1,21 @@
 <script lang="ts">
+  import FilterEditor from './FilterEditor.svelte';
+  import SampleLogPopover from './SampleLogPopover.svelte';
   import { untrack } from 'svelte';
   import { findSampleFields, parseColumnDraft } from '$lib/columns';
-  import type { JSONValue } from '$lib/transport/types';
+  import type { APIErrorBody, FilterSpec, JSONValue } from '$lib/transport/types';
   import type { ViewerState } from '$lib/transport/viewer-state';
 
   let {
     viewer,
     appliedColumns,
     onApply,
+    onApplyFilters,
   }: {
     viewer: ViewerState;
     appliedColumns: readonly string[];
     onApply: (columns: string[]) => void;
+    onApplyFilters: (filters: FilterSpec[]) => Promise<APIErrorBody | undefined>;
   } = $props();
 
   let draft = $state(untrack(() => appliedColumns.join('\n')));
@@ -23,7 +27,6 @@
   let lineCount = $derived(Math.max(1, draft.split('\n').length));
   let unchanged = $derived(columnsEqual(draftColumns, appliedColumns));
   let canApply = $derived(draftColumns.length > 0 && !unchanged);
-  let sampleJSON = $derived(sampleFields ? JSON.stringify(sampleFields, null, 2) : '');
 
   // Pin the first structured row observed for each input generation so the helper
   // does not change while the user scrolls through different virtual pages.
@@ -50,9 +53,9 @@
   }
 </script>
 
-<section class="flex h-full min-h-0 flex-col p-3 text-sidebar-foreground" aria-label="Column configuration">
+<section class="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3 text-sidebar-foreground" aria-label="Column configuration">
   <div class="shrink-0">
-    <h2 class="text-sm font-semibold">Columns</h2>
+    <div class="flex items-center gap-2"><h2 class="text-sm font-semibold">Columns</h2><SampleLogPopover fields={sampleFields} {viewer} context="columns" /></div>
     <p id="columns-help" class="mt-1 text-xs leading-5 text-muted-foreground">
       Enter one field per line. <code>timestamp</code>, <code>severity</code>, and <code>message</code> use normalized values;
       dot notation selects nested JSON fields such as <code>request.host</code>.
@@ -95,25 +98,7 @@
     </div>
   </div>
 
-  <div class="my-3 shrink-0 border-t"></div>
-
-  <div class="flex min-h-0 flex-1 flex-col">
-    <h2 class="shrink-0 text-sm font-semibold">Sample log entry</h2>
-    <p class="mt-1 shrink-0 text-xs leading-5 text-muted-foreground">
-      Column paths match this original JSON structure exactly.
-    </p>
-    {#if sampleFields}
-      <pre class="mt-2 min-h-0 flex-1 overflow-auto rounded-md border bg-background p-2 font-mono text-[0.6875rem] leading-5 text-muted-foreground" aria-label="Sample JSON log entry">{sampleJSON}</pre>
-    {:else}
-      <div class="mt-2 min-h-0 flex-1 rounded-md border bg-background p-3 text-xs leading-5 text-muted-foreground" role="status">
-        {#if viewer.session?.inputKind === 'raw'}
-          No structured JSON fields are available.
-        {:else if viewer.session?.inputStatus === 'eof' && viewer.session?.inputKind === 'records'}
-          No structured fields were found in the loaded rows.
-        {:else}
-          Waiting for a structured log entry…
-        {/if}
-      </div>
-    {/if}
-  </div>
+  <FilterEditor applied={viewer.displayed?.filter} pending={viewer.pending !== undefined} disabled={viewer.session?.inputKind !== 'records'} onApply={onApplyFilters}>
+    {#snippet helper()}<SampleLogPopover fields={sampleFields} {viewer} context="filters" />{/snippet}
+  </FilterEditor>
 </section>

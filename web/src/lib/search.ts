@@ -21,10 +21,8 @@ export function validateSearch(search: SearchSpec): LineError[] {
   if (search.mode === 'plain') return [];
   const errors: LineError[] = [];
   for (const { text, line } of searchLines(search.text)) {
-    try { new RegExp(text, 'iu'); }
-    catch (error) {
-      errors.push({ line, message: error instanceof Error ? error.message : 'Invalid regular expression' });
-    }
+    const message = validateRegex(text);
+    if (message) errors.push({ line, message });
   }
   return errors;
 }
@@ -47,4 +45,10 @@ export function visibleServerErrors(draft: SearchSpec, rejection?: SearchRejecti
   const current = normalizeSearchText(draft.text).split('\n');
   const submitted = normalizeSearchText(rejection.search.text).split('\n');
   return rejection.errors.filter(error => current[error.line - 1] === submitted[error.line - 1]);
+}
+
+/** Shared syntax-only check; Go remains authoritative for supported expressions. */
+export function validateRegex(text: string): string | undefined {
+  try { new RegExp(text, 'iu'); }
+  catch (error) { return error instanceof Error ? error.message : 'Invalid regular expression'; }
 }
