@@ -1,7 +1,7 @@
 import { pageOffsetsForRange, PAGE_SIZE } from '$lib/virtual-window';
 import { HTTPQueryAPI, TransportError, type EventConnection, type QueryAPI } from './api';
 import { PageCache } from './page-cache';
-import type { APIErrorBody, QueryEvent, QuerySort, QueryState, RowPage, Session, Snapshot } from './types';
+import type { APIErrorBody, QueryEvent, QuerySort, QuerySpec, SearchSpec, QueryState, RowPage, Session, Snapshot } from './types';
 import { reduceViewer, type ViewerState } from './viewer-state';
 
 /** Coordinates query lifecycle, SSE notifications, guarded page loading, and follow state. */
@@ -51,7 +51,10 @@ export class ViewerController {
   }
 
   /** Builds a replacement query while preserving the current display until its first page is ready. */
-  async setQuery(filter: string, sort: QuerySort = 'input') {
+  async setQuery(filter: string, sort: QuerySort = 'input', search?: SearchSpec): Promise<APIErrorBody | undefined> {
+    // Copy caller-owned options before asynchronous work; recovery must replay
+    // the confirmed query, never whatever the editor currently contains.
+    const spec: QuerySpec = { filter, sort, search: search ? { ...search } : undefined };
     const intent = ++this.intent;
     this.rangeRequest++;
     this.activeRange = undefined;
@@ -66,16 +69,18 @@ export class ViewerController {
     if (superseded) void this.api.delete(superseded);
     const priorEvents = this.activeEvents;
     try {
-      const query = await this.api.create(filter, sort, this.abort.signal);
+      const query = await this.api.create(spec, this.abort.signal);
       if (!this.current(intent)) { void this.api.delete(query.queryId); return; }
-      this.dispatch({ type: 'pending', queryId: query.queryId, filter });
-      this.pendingEvents = this.api.events(query.queryId, event => void this.receive(intent, filter, sort, event), () => void this.resync(intent, filter, sort, query.queryId));
-      await this.acceptState(intent, filter, sort, query);
+      this.dispatch({ type: 'pending', queryId: query.queryId, ...spec });
+      this.pendingEvents = this.api.events(query.queryId, event => void this.receive(intent, spec, event), () => void this.resync(intent, spec, query.queryId));
+      await this.acceptState(intent, spec, query);
       if (this.state.displayed?.queryId === query.queryId && priorEvents) priorEvents.close();
     } catch (error) {
       if (this.current(intent) && !isAbort(error)) {
-        this.dispatch({ type: 'failed', error: errorBody(error) });
+        const body = errorBody(error);
+        this.dispatch({ type: 'failed', error: body });
         this.restoreDisplayed(intent);
+        return body;
       }
     }
   }
@@ -188,7 +193,7 @@ export class ViewerController {
   }
 
   /** Handles one SSE event, including generation replacement and recovery. */
-  private async receive(intent: number, filter: string, sort: QuerySort, event: QueryEvent) {
+  private async receive(intent: number, spec: QuerySpec, event: QueryEvent) {
     if (!this.current(intent)) return;
     this.dispatch({ type: 'session', session: event.session });
     if (event.session.inputKind === 'raw') {
@@ -196,9 +201,9 @@ export class ViewerController {
       return;
     }
     const snapshotGeneration = event.state.snapshot?.generationId;
-    if (event.type === 'generation' || (snapshotGeneration && snapshotGeneration !== event.session.generationId)) { void this.setQuery(filter, sort); return; }
-    try { await this.acceptState(intent, filter, sort, event.state); }
-    catch (error) { if (!isAbort(error)) void this.resync(intent, filter, sort, event.state.queryId); }
+    if (event.type === 'generation' || (snapshotGeneration && snapshotGeneration !== event.session.generationId)) { void this.setQuery(spec.filter, spec.sort, spec.search); return; }
+    try { await this.acceptState(intent, spec, event.state); }
+    catch (error) { if (!isAbort(error)) void this.resync(intent, spec, event.state.queryId); }
   }
 
   /** Leaves query mode and begins guarded sequential raw-output paging. */
@@ -227,7 +232,7 @@ export class ViewerController {
   }
 
   /** Converts authoritative query state into guarded page fetches and atomic viewer transitions. */
-  private async acceptState(intent: number, filter: string, sort: QuerySort, query: QueryState) {
+  private async acceptState(intent: number, spec: QuerySpec, query: QueryState) {
     if (!this.current(intent)) return;
     if (query.status === 'failed') {
       this.dispatch({ type: 'failed', error: query.error ?? { code: 'query_failed', message: 'Query failed' } });
@@ -256,7 +261,7 @@ export class ViewerController {
     if (!this.current(intent) || this.requestedRevision.get(query.queryId) !== revision) return;
     if (replacing) {
       const oldID = this.state.displayed?.queryId;
-      this.dispatch({ type: 'replace', query: { queryId: query.queryId, filter, sort, snapshot, pages } });
+      this.dispatch({ type: 'replace', query: { queryId: query.queryId, ...spec, snapshot, pages } });
       this.activeEvents?.close();
       this.activeEvents = this.pendingEvents;
       this.pendingEvents = undefined;
@@ -310,17 +315,17 @@ export class ViewerController {
     const displayed = this.state.displayed;
     if (!displayed || !this.current(intent)) return;
     this.activeEvents?.close();
-    this.activeEvents = this.api.events(displayed.queryId, event => void this.receive(intent, displayed.filter, displayed.sort, event), () => void this.resync(intent, displayed.filter, displayed.sort, displayed.queryId));
-    void this.resync(intent, displayed.filter, displayed.sort, displayed.queryId);
+    this.activeEvents = this.api.events(displayed.queryId, event => void this.receive(intent, displayed, event), () => void this.resync(intent, displayed, displayed.queryId));
+    void this.resync(intent, displayed, displayed.queryId);
   }
 
   /** Reads current state after stream failure and rebuilds expired following queries. */
-  private async resync(intent: number, filter: string, sort: QuerySort, queryId: string) {
+  private async resync(intent: number, spec: QuerySpec, queryId: string) {
     if (!this.current(intent)) return;
-    try { await this.acceptState(intent, filter, sort, await this.api.get(queryId)); }
+    try { await this.acceptState(intent, spec, await this.api.get(queryId)); }
     catch (error) {
       if (error instanceof TransportError && error.status === 404 && this.state.displayed?.queryId === queryId) {
-        if (this.state.following) void this.setQuery(filter, sort);
+        if (this.state.following) void this.setQuery(spec.filter, spec.sort, spec.search);
         else this.dispatch({ type: 'refreshRequired', error: errorBody(error) });
       }
     }
@@ -339,5 +344,5 @@ export class ViewerController {
 function isAbort(error: unknown) { return error instanceof DOMException && error.name === 'AbortError'; }
 /** Converts unknown client failures into the UI error contract. */
 function errorBody(error: unknown): APIErrorBody {
-  return error instanceof TransportError ? { code: error.code, message: error.message } : { code: 'transport_error', message: error instanceof Error ? error.message : 'Transport failed' };
+  return error instanceof TransportError ? { code: error.code, message: error.message, lineErrors: error.lineErrors } : { code: 'transport_error', message: error instanceof Error ? error.message : 'Transport failed' };
 }

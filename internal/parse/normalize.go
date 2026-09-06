@@ -130,6 +130,7 @@ func normalizeJournald(fields map[string]any, diagnostics []logmodel.Diagnostic)
 			addDiagnostic(&record.Diagnostics, "missing_message", "journald record does not contain MESSAGE")
 		}
 		record.Message = compactJSON(fields)
+		record.MessageIsJSON = true
 	}
 
 	for _, key := range []string{"_SOURCE_REALTIME_TIMESTAMP", "__REALTIME_TIMESTAMP"} {
@@ -259,6 +260,7 @@ func normalizeJSON(fields map[string]any, context parseContext, diagnostics []lo
 			record.Message = text
 		} else {
 			record.Message = compactJSON(value)
+			record.MessageIsJSON = true
 			addDiagnostic(&record.Diagnostics, "non_text_message", key+" was serialized because it was not a string")
 		}
 		messageFound = true
@@ -266,6 +268,7 @@ func normalizeJSON(fields map[string]any, context parseContext, diagnostics []lo
 	}
 	if !messageFound {
 		record.Message = compactJSON(fields)
+		record.MessageIsJSON = true
 		addDiagnostic(&record.Diagnostics, "missing_message", "JSON object has no usable message, msg, or log field")
 	}
 

@@ -1,10 +1,8 @@
-import type { APIErrorBody, QuerySort, RawChunkPage, RowPage, Session, Snapshot } from './types';
+import type { APIErrorBody, QuerySpec, RawChunkPage, RowPage, Session, Snapshot } from './types';
 
 /** Query snapshot and small page set currently presented by the virtual table. */
-export interface DisplayedQuery {
+export interface DisplayedQuery extends QuerySpec {
   queryId: string;
-  filter: string;
-  sort: QuerySort;
   snapshot: Snapshot;
   /** Visible and prefetched pages only; the larger reusable set remains in PageCache. */
   pages: RowPage[];
@@ -24,7 +22,7 @@ export interface ViewerState {
   /** True only while snapshot notifications should move the table to the latest tail. */
   following: boolean;
   displayed?: DisplayedQuery;
-  pending?: { queryId: string; filter: string; progress?: number };
+  pending?: QuerySpec & { queryId: string; progress?: number };
   error?: APIErrorBody;
   /** Signals that a paused snapshot expired and must not be replaced silently. */
   needsRefresh: boolean;
@@ -35,7 +33,7 @@ export interface ViewerState {
 /** Exhaustive events accepted by the pure viewer reducer. */
 export type ViewerAction =
   | { type: 'session'; session: Session }
-  | { type: 'pending'; queryId: string; filter: string }
+  | ({ type: 'pending'; queryId: string } & QuerySpec)
   | { type: 'progress'; queryId: string; processed: bigint; total: bigint }
   | { type: 'replace'; query: DisplayedQuery }
   | { type: 'extend'; snapshot: Snapshot; pages: RowPage[] }
@@ -52,7 +50,7 @@ export type ViewerAction =
 export function reduceViewer(state: ViewerState, action: ViewerAction): ViewerState {
   switch (action.type) {
     case 'session': return { ...state, session: action.session };
-    case 'pending': return { ...state, pending: { queryId: action.queryId, filter: action.filter }, raw: undefined, error: undefined };
+    case 'pending': return { ...state, pending: { queryId: action.queryId, filter: action.filter, sort: action.sort, search: action.search }, raw: undefined, error: undefined };
     case 'progress': {
       if (state.pending?.queryId !== action.queryId) return state;
       const progress = action.total === 0n ? 1 : Number(action.processed * 1000n / action.total) / 1000;

@@ -24,7 +24,7 @@ describe('viewer state', () => {
         pages: [page(descriptor, '0', [{ id: '1', message: 'old', sourceFormat: 'text' }])],
       },
     };
-    const pending = reduceViewer(initial, { type: 'pending', queryId: 'new', filter: 'error' });
+    const pending = reduceViewer(initial, { type: 'pending', sort: 'input', queryId: 'new', filter: 'error' });
     expect(pending.displayed?.pages[0].rows[0].message).toBe('old');
     const failed = reduceViewer(pending, { type: 'failed', error: { code: 'invalid_filter', message: 'bad filter' } });
     expect(failed.displayed?.queryId).toBe('old');

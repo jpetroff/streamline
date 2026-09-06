@@ -47,3 +47,19 @@ from `bun.lock`. Bun runs the frontend tooling. The built binary runs on its own
 
 The frontend shell, stdin ingestion, parser, parsed/raw transport, in-memory
 query service, health endpoint, and build tooling are implemented.
+
+
+## Search logs
+
+Use the search textarea below the table, then click **Apply** or press
+**Ctrl/Cmd+Enter**. Search is case-insensitive and includes nested values even
+when their fields are not visible as columns. One expression goes on each line;
+**OR** matches any line, while **AND** requires every line to match somewhere in
+the same entry. Applying an empty search clears it.
+
+**Plain** treats punctuation literally. **Regexp** accepts expressions such as
+`timeout|refused` or `status=[45][0-9]{2}`, without slash delimiters. Invalid lines
+have an error bullet with details on hover or keyboard focus. Browser syntax
+validation runs immediately; Go validates again on Apply and can reject JS-only
+features such as lookaround and backreferences. Previous results stay visible
+if a search is rejected. Raw-output search and saved searches are not included.

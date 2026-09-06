@@ -53,8 +53,9 @@ type Session struct {
 }
 
 type APIError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code       string      `json:"code"`
+	Message    string      `json:"message"`
+	LineErrors []LineError `json:"lineErrors,omitempty"`
 }
 
 // Error lets APIError cross service boundaries as a standard Go error.
@@ -120,8 +121,9 @@ type RawChunkPage struct {
 }
 
 type CreateRequest struct {
-	Filter string `json:"filter"`
-	Sort   Sort   `json:"sort"`
+	Filter string      `json:"filter"`
+	Sort   Sort        `json:"sort"`
+	Search *SearchSpec `json:"search,omitempty"`
 }
 
 type Event struct {

@@ -22,13 +22,16 @@ type Diagnostic struct {
 // only values supported by JSON: nil, booleans, strings, json.Number values,
 // []any values, and map[string]any values.
 type Record struct {
-	ID           uint64         `json:"-"`
-	Timestamp    string         `json:"timestamp,omitempty"`
-	Severity     string         `json:"severity,omitempty"`
-	Message      string         `json:"message"`
-	Fields       map[string]any `json:"fields,omitempty"`
-	SourceFormat SourceFormat   `json:"sourceFormat"`
-	Diagnostics  []Diagnostic   `json:"diagnostics,omitempty"`
+	ID        uint64 `json:"-"`
+	Timestamp string `json:"timestamp,omitempty"`
+	Severity  string `json:"severity,omitempty"`
+	Message   string `json:"message"`
+	// MessageIsJSON marks a display fallback serialized from structured values.
+	// Search must visit Fields instead, otherwise object keys become matches.
+	MessageIsJSON bool           `json:"-"`
+	Fields        map[string]any `json:"fields,omitempty"`
+	SourceFormat  SourceFormat   `json:"sourceFormat"`
+	Diagnostics   []Diagnostic   `json:"diagnostics,omitempty"`
 }
 
 // CloneRecord copies all mutable JSON trees owned by a record.

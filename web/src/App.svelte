@@ -3,6 +3,7 @@
   import { configureColumns, DEFAULT_COLUMNS, type DateDisplayFormat } from '$lib/columns';
   import ColumnSidebar from '$lib/components/ColumnSidebar.svelte';
   import RawOutput from '$lib/components/RawOutput.svelte';
+  import SearchEditor from '$lib/components/SearchEditor.svelte';
   import RowDetailPanel from '$lib/components/RowDetailPanel.svelte';
   import VirtualLogTable from '$lib/components/VirtualLogTable.svelte';
   import { ViewerController } from '$lib/transport/viewer-controller';
@@ -121,5 +122,12 @@
         </div>
       {/if}
     </div>
+    {#if viewer.session?.inputKind === 'records'}
+      <SearchEditor
+        applied={viewer.displayed?.search}
+        pending={viewer.pending !== undefined}
+        onApply={search => controller.setQuery(viewer.displayed?.filter ?? '', viewer.displayed?.sort ?? 'input', search)}
+      />
+    {/if}
   </main>
 </div>

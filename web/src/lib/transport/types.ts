@@ -19,10 +19,31 @@ export interface ParseDiagnostic {
   message: string;
 }
 
+/** Confirmed general search over nested scalar values in each log entry. */
+export interface SearchSpec {
+  text: string;
+  mode: 'plain' | 'regexp';
+  operator: 'or' | 'and';
+}
+
+/** Complete immutable query command, retained through reconnect and recovery. */
+export interface QuerySpec {
+  filter: string;
+  sort: QuerySort;
+  search?: SearchSpec;
+}
+
+/** An expression failure at its original one-based editor line. */
+export interface LineError {
+  line: number;
+  message: string;
+}
+
 /** Stable machine-readable error envelope returned by the binary. */
 export interface APIErrorBody {
   code: string;
   message: string;
+  lineErrors?: LineError[];
 }
 
 /** Identity and input state for one in-memory binary session. */

@@ -17,8 +17,8 @@
 
 The server uses Go's standard library and builds with CGo disabled.
 Stdin ingestion is implemented. No shared filter-expression compiler, profiles,
-or graphs are implemented. The production service currently accepts the
-unfiltered input-order query.
+or graphs are implemented. The production service supports general plain/regexp
+search in input order; the permanent-filter compiler still accepts only an empty filter.
 See [parser flow and revisitable decisions](parser.md) for the implemented
 normalization boundary.
 
@@ -170,3 +170,26 @@ contract tests against memory and future persistent providers.
 - [shadcn-svelte](https://www.shadcn-svelte.com/docs)
 - [TanStack Svelte Virtual](https://tanstack.com/virtual/latest/docs/framework/svelte/svelte-virtual)
 - [Journal export formats](https://systemd.io/JOURNAL_EXPORT_FORMATS/)
+
+## General search pipeline
+
+See [General log search](search.md) for architecture, execution flow, and design choices.
+
+`internal/query/search.go` owns pure line parsing, matcher compilation, scalar
+traversal, and record predicate composition. `MemoryService.Create` compiles the
+existing `Compiler` predicate first and general search last. Initial scans,
+catch-up, and live appends use that same immutable composed predicate before
+adding IDs to result indexes. Future permanent filters must precede search.
+
+Search visits original nested field values and normalized timestamp, severity,
+and meaningful message values. It excludes keys, paths, IDs, diagnostics, and
+source-format metadata. `Record.MessageIsJSON` is internal provenance: parser
+messages serialized from containers/non-string values are display fallbacks,
+so search traverses their original Fields instead of matching serialized keys.
+Actual string messages (including JSON-looking strings) remain searchable.
+
+Each line matches independently against individual scalar values. OR combines
+whole-record results; AND requires every line to match in the same record.
+Numbers retain their JSON representation; containers are never concatenated.
+Compilation is once per query, case-insensitive by default, with literal
+expressions escaped through `regexp.QuoteMeta`. Empty search is the identity.

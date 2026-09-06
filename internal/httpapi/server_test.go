@@ -176,3 +176,35 @@ func TestSharedQueryEventFixtureMatchesGoContract(t *testing.T) {
 		t.Fatalf("unexpected fixture: %#v", event)
 	}
 }
+
+func TestSearchHTTPValidationAndMatching(t *testing.T) {
+	service := query.NewMemoryService(nil)
+	service.Append([]query.Record{{Message: "timeout", Fields: map[string]any{"nested": map[string]any{"host": "api"}}}, {Message: "healthy"}})
+	handler := NewHandler(http.NotFoundHandler(), service)
+	invalid := httptest.NewRecorder()
+	handler.ServeHTTP(invalid, httptest.NewRequest(http.MethodPost, "/api/v1/queries", strings.NewReader(`{"search":{"text":"ok\n\n[\n(?=x)","mode":"regexp"}}`)))
+	var envelope struct {
+		Error query.APIError `json:"error"`
+	}
+	if err := json.Unmarshal(invalid.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if invalid.Code != 400 || envelope.Error.Code != "invalid_search" || len(envelope.Error.LineErrors) != 2 || envelope.Error.LineErrors[0].Line != 3 || envelope.Error.LineErrors[1].Line != 4 {
+		t.Fatalf("response %d %s", invalid.Code, invalid.Body)
+	}
+	valid := httptest.NewRecorder()
+	handler.ServeHTTP(valid, httptest.NewRequest(http.MethodPost, "/api/v1/queries", strings.NewReader(`{"filter":"","sort":"input","search":{"text":"TIMEOUT\napi","operator":"and"}}`)))
+	if valid.Code != 202 {
+		t.Fatalf("response %d %s", valid.Code, valid.Body)
+	}
+	var state query.State
+	if err := json.Unmarshal(valid.Body.Bytes(), &state); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	ready := waitReady(t, server.Client(), server.URL+"/api/v1/queries/"+state.QueryID)
+	if ready.Snapshot.MatchedCount != "1" {
+		t.Fatalf("snapshot %#v", ready.Snapshot)
+	}
+}

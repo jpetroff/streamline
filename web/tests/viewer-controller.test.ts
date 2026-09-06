@@ -1,12 +1,13 @@
 import { expect, test } from 'bun:test';
-import type { EventConnection, QueryAPI } from '../src/lib/transport/api';
+import { TransportError, type EventConnection, type QueryAPI } from '../src/lib/transport/api';
 import { ViewerController } from '../src/lib/transport/viewer-controller';
-import type { QueryEvent, QuerySort, QueryState, RawChunkPage, RowPage, Session, Snapshot } from '../src/lib/transport/types';
+import type { QueryEvent, QuerySpec, QueryState, RawChunkPage, RowPage, Session, Snapshot } from '../src/lib/transport/types';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>(done => { resolve = done; });
-  return { promise, resolve };
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 
 function ready(queryId: string, matchedCount = '1', revision = '1'): QueryState {
@@ -19,10 +20,12 @@ function ready(queryId: string, matchedCount = '1', revision = '1'): QueryState 
 class FakeAPI implements QueryAPI {
   creates = new Map<string, ReturnType<typeof deferred<QueryState>>>();
   deleted: string[] = [];
+  specs: QuerySpec[] = [];
   session(): Promise<Session> { return Promise.resolve({ sessionId: 'session', generationId: '1', inputStatus: 'streaming', inputKind: 'records' }); }
-  create(filter: string, _sort: QuerySort): Promise<QueryState> {
+  create(spec: QuerySpec): Promise<QueryState> {
+    this.specs.push(spec);
     const request = deferred<QueryState>();
-    this.creates.set(filter, request);
+    this.creates.set(spec.filter, request);
     return request.promise;
   }
   get(queryId: string): Promise<QueryState> { return Promise.resolve(ready(queryId)); }
@@ -226,4 +229,82 @@ test('an input event atomically releases an empty parsed query for raw mode', as
   expect(controller.state.displayed).toBeUndefined();
   expect(controller.state.raw?.chunks).toEqual(['report']);
   controller.dispose();
+});
+
+test('confirmed search is copied into pending and displayed query state', async () => {
+  const api = new FakeAPI();
+  const controller = new ViewerController(api);
+  const search = { text: 'timeout\napi', mode: 'plain' as const, operator: 'and' as const };
+  const pending = controller.setQuery('permanent', 'input', search);
+  search.text = 'unconfirmed edit';
+  expect(api.specs[0].search?.text).toBe('timeout\napi');
+  api.creates.get('permanent')!.resolve({ queryId: 'search-query', status: 'building' });
+  await pending;
+  expect(controller.state.pending?.search?.text).toBe('timeout\napi');
+  controller.dispose();
+});
+
+test('backend line errors preserve the old display and return diagnostics to the editor', async () => {
+  const api = new FakeAPI();
+  const controller = new ViewerController(api);
+  const initial = controller.setQuery('old', 'input', { text: 'old', mode: 'plain', operator: 'or' });
+  api.creates.get('old')!.resolve(ready('old-query'));
+  await initial;
+  const replacement = controller.setQuery('new', 'input', { text: '(?=x)', mode: 'regexp', operator: 'or' });
+  api.creates.get('new')!.reject(new TransportError('invalid_search', 'Unsupported expression', 400, [{ line: 1, message: 'lookaround unsupported' }]));
+  const error = await replacement;
+  expect(error?.lineErrors).toEqual([{ line: 1, message: 'lookaround unsupported' }]);
+  expect(controller.state.displayed?.queryId).toBe('old-query');
+  expect(controller.state.displayed?.search?.text).toBe('old');
+  expect(controller.state.error?.lineErrors).toEqual(error?.lineErrors);
+  controller.dispose();
+});
+
+test('a superseded rejection cannot annotate or replace the latest search', async () => {
+  const api = new FakeAPI();
+  const controller = new ViewerController(api);
+  const first = controller.setQuery('first', 'input', { text: '(?=x)', mode: 'regexp', operator: 'or' });
+  const second = controller.setQuery('second', 'input', { text: 'ok', mode: 'plain', operator: 'and' });
+  api.creates.get('second')!.resolve(ready('second-query'));
+  await second;
+  api.creates.get('first')!.reject(new TransportError('invalid_search', 'Unsupported', 400, [{ line: 1, message: 'unsupported' }]));
+  expect(await first).toBeUndefined();
+  expect(controller.state.error).toBeUndefined();
+  expect(controller.state.displayed?.search).toEqual({ text: 'ok', mode: 'plain', operator: 'and' });
+  controller.dispose();
+});
+
+class SearchRecoveryAPI extends FakeAPI {
+  listeners = new Map<string, { event: (event: QueryEvent) => void; error: () => void }>();
+  expired = false;
+  override events(queryId: string, event: (event: QueryEvent) => void, error: () => void): EventConnection {
+    this.listeners.set(queryId, { event, error });
+    return { close: () => { this.listeners.delete(queryId); } };
+  }
+  override get(queryId: string): Promise<QueryState> {
+    return this.expired ? Promise.reject(new TransportError('query_not_found', 'Expired', 404)) : super.get(queryId);
+  }
+}
+
+test('generation changes and expired reconnects preserve every applied search option', async () => {
+  for (const recovery of ['generation', 'expired']) {
+    const api = new SearchRecoveryAPI();
+    const controller = new ViewerController(api);
+    const search = { text: 'timeout\napi', mode: 'regexp' as const, operator: 'and' as const };
+    const initial = controller.setQuery('permanent', 'input', search);
+    api.creates.get('permanent')!.resolve(ready('old-query'));
+    await initial;
+    if (recovery === 'generation') {
+      api.listeners.get('old-query')!.event({ type: 'generation', state: ready('old-query'), session: { sessionId: 'session', generationId: '2', inputStatus: 'streaming', inputKind: 'records' } });
+    } else {
+      api.expired = true;
+      api.listeners.get('old-query')!.error();
+    }
+    await settle();
+    expect(api.specs).toHaveLength(2);
+    expect(api.specs[1]).toEqual({ filter: 'permanent', sort: 'input', search });
+    api.creates.get('permanent')!.resolve(ready('replacement', '0'));
+    await settle();
+    controller.dispose();
+  }
 });

@@ -22,7 +22,8 @@ The implementation adds:
 The binary starts progressive stdin ingestion alongside the HTTP server.
 Recognized logs are appended in committed batches; unrecognized terminal input
 is published as display-safe raw chunks at EOF or read failure. The production
-compiler still accepts only the empty, input-order query. Normalization ownership
+permanent-filter compiler still accepts only an empty filter; general search
+is available independently, with input ordering. Normalization ownership
 is documented in [Parser engine](parser.md).
 
 ## Architecture
@@ -162,3 +163,32 @@ routing, raw transitions, atomic replacement, reversed query responses, pause
 semantics, page prefetch and deduplication, stale viewport responses, segmented
 bigint virtual offsets, partial-tail cache invalidation, and the shared 64-bit JSON fixture.
 A production frontend build and standalone Go build verify the embedded path.
+
+## General search command
+
+See [General log search](search.md) for architecture, execution flow, and design choices.
+
+`POST /api/v1/queries` accepts an optional `search` object alongside existing
+`filter` and `sort`:
+
+```json
+{"filter":"","sort":"input","search":{"text":"timeout\napi","mode":"plain","operator":"and"}}
+```
+
+`mode` is `plain` (default) or `regexp`; `operator` is `or` (default) or `and`.
+Unknown values are rejected. Omitted or blank search imposes no additional
+restriction. LF, CRLF, and CR delimit expressions. Whitespace-only lines are
+ignored; significant whitespace and physical line numbers are preserved.
+The existing 64 KiB request-body bound still applies.
+
+All expressions compile before query creation. Invalid expressions return
+HTTP 400 with `error.code: "invalid_search"`, a summary `message`, and
+`lineErrors: [{"line": 3, "message": "..."}]` for every failing physical line
+(one-based). Invalid mode/operator errors use the same code without line errors.
+The HTTP client preserves these diagnostics for the editor. Failed submissions
+leave previous results available and create no query.
+
+Frontend query specifications retain search alongside filter and sort through
+pending/displayed state, generation changes, reconnects, and expiration recovery.
+Row, snapshot, and SSE shapes are unchanged; matched counts and pages already
+reflect search, rather than filtering a fetched page in the browser.

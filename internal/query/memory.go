@@ -118,6 +118,14 @@ func (s *MemoryService) Create(_ context.Context, request CreateRequest) (State,
 		return State{}, err
 	}
 
+	search, err := compileSearch(request.Search)
+	if err != nil {
+		return State{}, err
+	}
+	// General search is always the final filtering factor. Future permanent
+	// predicates belong before it, so snapshots and pages index only final matches.
+	predicate = allPredicates(predicate, search)
+
 	s.mu.Lock()
 	s.pruneLocked()
 	id := randomID()
@@ -408,6 +416,7 @@ func cloneState(state State) State {
 	}
 	if state.Error != nil {
 		e := *state.Error
+		e.LineErrors = append([]LineError(nil), e.LineErrors...)
 		copy.Error = &e
 	}
 	return copy

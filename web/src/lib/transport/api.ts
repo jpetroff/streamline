@@ -1,9 +1,9 @@
-import type { QueryEvent, QuerySort, QueryState, RawChunkPage, RowPage, Session } from './types';
+import type { LineError, QueryEvent, QuerySpec, QueryState, RawChunkPage, RowPage, Session } from './types';
 
 /** Structured transport failure carrying the server's stable error code and HTTP status. */
 export class TransportError extends Error {
   /** Creates an error carrying the stable server code and HTTP status. */
-  constructor(public readonly code: string, message: string, public readonly status: number) {
+  constructor(public readonly code: string, message: string, public readonly status: number, public readonly lineErrors?: LineError[]) {
     super(message);
   }
 }
@@ -13,7 +13,7 @@ async function responseJSON<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = body?.error;
-    throw new TransportError(error?.code ?? 'http_error', error?.message ?? response.statusText, response.status);
+    throw new TransportError(error?.code ?? 'http_error', error?.message ?? response.statusText, response.status, error?.lineErrors);
   }
   return body as T;
 }
@@ -29,7 +29,7 @@ export interface QueryAPI {
   /** Reads current session identity and input state. */
   session(signal?: AbortSignal): Promise<Session>;
   /** Starts a new immutable filter and sort query. */
-  create(filter: string, sort: QuerySort, signal?: AbortSignal): Promise<QueryState>;
+  create(spec: QuerySpec, signal?: AbortSignal): Promise<QueryState>;
   /** Resynchronizes the latest authoritative state for a query. */
   get(queryId: string, signal?: AbortSignal): Promise<QueryState>;
   /** Fetches a bounded row window from an exact snapshot token. */
@@ -53,11 +53,11 @@ export class HTTPQueryAPI implements QueryAPI {
   }
 
   /** Sends a query command and returns its initial building or ready state. */
-  create(filter: string, sort: QuerySort, signal?: AbortSignal) {
+  create(spec: QuerySpec, signal?: AbortSignal) {
     return fetch(`${this.baseURL}/queries`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filter, sort }),
+      body: JSON.stringify(spec),
       signal,
     }).then(responseJSON<QueryState>);
   }

@@ -422,3 +422,34 @@ Frontend tests cover:
 The production smoke check starts `bin/streamline`, loads the embedded root
 document, and verifies `/api/v1/health`. Browser visual QA is separate from these
 structural and behavioral checks.
+
+
+## General search editor
+
+See [General log search](search.md) for architecture, execution flow, and design choices.
+
+`SearchEditor.svelte` sits below the table, outside its scrolling viewport, and
+remains available for zero matches. It is shown only for parsed record input.
+Text, Plain/Regexp mode, and OR/AND are drafts until Apply or Ctrl/Cmd+Enter.
+Enter inserts a newline. Applying an empty search clears general search while
+retaining permanent filters. There is no persistence or raw-output search.
+
+`search.ts` provides pure line normalization, syntax checking, equality, and
+server-error association helpers. Regexp mode constructs `new RegExp(line, 'iu')`
+in try/catch for every nonblank line on edits and confirmation. It never runs
+user regexps against logs in the browser. Plain mode bypasses syntax checks.
+No WASM assets, workers, third-party validator, or build steps are involved.
+
+The supported editor syntax is the overlap accepted by the browser and Go;
+Go determines matching semantics. JS-valid lookaround/backreferences can still
+fail on confirmation, producing backend line bullets. Full JS/Go semantic parity
+is not promised and no syntax translation occurs. Useful expressions include
+`timeout|refused`, `status=[45][0-9]{2}`, and `^error$`. Enter raw expressions,
+without `/.../flags`; standalone Go flags such as `(?i)` fail JS validation.
+
+The nonwrapping monospace editor synchronizes its error gutter during scrolling.
+Every invalid line has a focusable bullet, hover/focus tooltip, and accessible
+error description. Backend errors attach only to the submitted draft and are
+cleared when the affected expression changes or Plain mode is selected. Older
+in-flight responses cannot annotate a newer draft. The viewer keeps old rows
+until a replacement query's first page is ready, including after validation errors.
