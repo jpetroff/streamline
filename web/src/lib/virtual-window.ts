@@ -1,5 +1,7 @@
 /** Fixed summary-row height in CSS pixels. */
-export const ROW_HEIGHT = 32;
+export const ROW_HEIGHT = 24;
+/** Fixed height for two wrapped summary lines. */
+export const WRAPPED_ROW_HEIGHT = 40;
 /** Number of rows mounted before and after the visible TanStack range. */
 export const OVERSCAN_ROWS = 12;
 /** Stable server and browser row-page size. */
@@ -45,9 +47,9 @@ export function rebasedSegment(total: bigint, base: bigint, startIndex: number, 
 }
 
 /** Maps one logical row back into a newly rebased browser segment. */
-export function scrollOffsetForAnchor(logicalIndex: bigint, base: bigint, intraRowOffset = 0): number {
+export function scrollOffsetForAnchor(logicalIndex: bigint, base: bigint, intraRowOffset = 0, rowHeight = ROW_HEIGHT): number {
   const localIndex = maxBigInt(0n, logicalIndex - base);
-  return Number(localIndex) * ROW_HEIGHT + intraRowOffset;
+  return Number(localIndex) * rowHeight + intraRowOffset;
 }
 
 /** Lists fixed page offsets covering a range plus neighboring prefetch pages. */

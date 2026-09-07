@@ -29,7 +29,12 @@ describe('virtual segments', () => {
 
   test('maps a bigint logical anchor to a safe local pixel offset', () => {
     const base = 9_007_199_254_700_000n;
-    expect(scrollOffsetForAnchor(base + 25_000n, base, 7)).toBe(25_000 * 32 + 7);
+    expect(scrollOffsetForAnchor(base + 25_000n, base, 7)).toBe(25_000 * 24 + 7);
+  });
+
+  test('preserves a logical anchor when rebasing wrapped rows', () => {
+    const base = 9_007_199_254_700_000n;
+    expect(scrollOffsetForAnchor(base + 25_000n, base, 17, 40)).toBe(25_000 * 40 + 17);
   });
 });
 

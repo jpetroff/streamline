@@ -1,6 +1,6 @@
 <script lang="ts">
   import { get } from 'svelte/store';
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { createVirtualizer } from '@tanstack/svelte-virtual';
   import {
     DATE_FORMAT_OPTIONS,
@@ -16,6 +16,7 @@
   import {
     OVERSCAN_ROWS,
     ROW_HEIGHT,
+    WRAPPED_ROW_HEIGHT,
     headSegment,
     rebasedSegment,
     scrollOffsetForAnchor,
@@ -27,6 +28,7 @@
     viewer,
     controller,
     columns,
+    rowLines = 1,
     onDateFormatChange,
     selectedRowId,
     onOpenDetails,
@@ -34,22 +36,33 @@
     viewer: ViewerState;
     controller: ViewerController;
     columns: readonly ColumnConfig[];
+    rowLines?: 1 | 2;
     onDateFormatChange: (index: number, format: DateDisplayFormat) => void;
     selectedRowId?: string;
     onOpenDetails: (row: LogRow) => void;
   } = $props();
   let scrollElement = $state<HTMLDivElement>();
+  let headerElement: HTMLDivElement;
+  const minimumColumnWidth = 144;
+  let columnWidths = $state<Record<string, number>>({});
+  let resize = $state<{ key: string; pointerId: number; startX: number; startWidth: number }>();
   let segmentBase = $state(0n);
   let segmentCount = $state(0);
   let programmaticScroll = $state(false);
   let resumePending = $state(false);
   let activeSnapshot = '';
   let moveSequence = 0;
+  let measuredRowHeight = ROW_HEIGHT;
+  let rowHeight = $derived(rowLines === 2 ? WRAPPED_ROW_HEIGHT : ROW_HEIGHT);
 
   let total = $derived(viewer.displayed ? BigInt(viewer.displayed.snapshot.matchedCount) : 0n);
   let rowsByOffset = $derived(indexPages(viewer.displayed?.pages ?? []));
-  let gridTemplate = $derived(columns.map(() => 'minmax(12rem, 1fr)').join(' '));
-  let minimumTableWidth = $derived(`${columns.length * 12}rem`);
+  let widths = $derived(columns.map((column, index) => columnWidths[`${index}:${column.path}`]));
+  let gridTemplate = $derived(widths.map(width => width === undefined ? 'minmax(12rem, 1fr)' : `${width}px`).join(' '));
+  let minimumTableWidth = $derived(`calc(${widths.map(width => width === undefined ? '12rem' : `${width}px`).join(' + ') || '0px'})`);
+  let tableWidth = $derived(widths.length > 0 && widths.every(width => width !== undefined)
+    ? minimumTableWidth
+    : `max(100%, ${minimumTableWidth})`);
 
   const virtualizer = createVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: 0,
@@ -63,12 +76,19 @@
     const count = segmentCount;
     const base = segmentBase;
     const element = scrollElement;
+    const height = rowHeight;
     get(virtualizer).setOptions({
       count,
       getScrollElement: () => element ?? null,
-      estimateSize: () => ROW_HEIGHT,
+      estimateSize: () => height,
       overscan: OVERSCAN_ROWS,
       getItemKey: index => (base + BigInt(index)).toString(),
+    });
+    untrack(() => {
+      if (height === measuredRowHeight) return;
+      const previousHeight = measuredRowHeight;
+      measuredRowHeight = height;
+      void updateRowHeight(previousHeight, height);
     });
   });
 
@@ -140,18 +160,38 @@
     finishProgrammaticScroll(sequence);
   }
 
+  /** Rebuilds fixed row measurements while preserving the visible row or live tail. */
+  async function updateRowHeight(previousHeight: number, height: number) {
+    const sequence = ++moveSequence;
+    const offset = scrollElement?.scrollTop ?? 0;
+    const visibleIndex = Math.floor(offset / previousHeight);
+    const intraRowOffset = Math.min(height - 1, offset % previousHeight);
+    const following = viewer.following;
+    programmaticScroll = true;
+    const instance = get(virtualizer);
+    instance.measure();
+    await tick();
+    if (sequence !== moveSequence) return;
+    if (following && segmentCount > 0) {
+      instance.scrollToIndex(segmentCount - 1, { align: 'end' });
+    } else {
+      scrollElement?.scrollTo({ top: visibleIndex * height + intraRowOffset });
+    }
+    finishProgrammaticScroll(sequence);
+  }
+
   /** Replaces the browser-sized segment while preserving the visible logical anchor. */
   async function rebase(segment: VirtualSegment, visibleStart: number) {
     const sequence = ++moveSequence;
     const logicalAnchor = segmentBase + BigInt(visibleStart);
-    const rawIntraRowOffset = (scrollElement?.scrollTop ?? 0) - visibleStart * ROW_HEIGHT;
-    const intraRowOffset = Math.max(0, Math.min(ROW_HEIGHT - 1, rawIntraRowOffset));
+    const rawIntraRowOffset = (scrollElement?.scrollTop ?? 0) - visibleStart * rowHeight;
+    const intraRowOffset = Math.max(0, Math.min(rowHeight - 1, rawIntraRowOffset));
     programmaticScroll = true;
     segmentBase = segment.base;
     segmentCount = segment.count;
     await tick();
     if (sequence !== moveSequence) return;
-    scrollElement?.scrollTo({ top: scrollOffsetForAnchor(logicalAnchor, segment.base, intraRowOffset) });
+    scrollElement?.scrollTo({ top: scrollOffsetForAnchor(logicalAnchor, segment.base, intraRowOffset, rowHeight) });
     finishProgrammaticScroll(sequence);
   }
 
@@ -178,6 +218,42 @@
     if (row && event.shiftKey && event.button === 0) event.preventDefault();
   }
 
+  // Freeze the rendered widths so dragging one column leaves its neighbors unchanged.
+  function measureColumnWidths() {
+    const headers = headerElement.querySelectorAll<HTMLElement>('[role="columnheader"]');
+    columnWidths = Object.fromEntries(columns.map((column, index) => [
+      `${index}:${column.path}`,
+      headers[index].getBoundingClientRect().width,
+    ]));
+  }
+
+  function startResize(event: PointerEvent, key: string) {
+    if (event.button !== 0 || resize) return;
+    event.preventDefault();
+    measureColumnWidths();
+    (event.currentTarget as HTMLButtonElement).setPointerCapture(event.pointerId);
+    resize = { key, pointerId: event.pointerId, startX: event.clientX, startWidth: columnWidths[key] };
+  }
+
+  function moveResize(event: PointerEvent) {
+    if (!resize || event.pointerId !== resize.pointerId) return;
+    columnWidths[resize.key] = Math.max(minimumColumnWidth, resize.startWidth + event.clientX - resize.startX);
+  }
+
+  function endResize(event: PointerEvent) {
+    if (event.pointerId !== resize?.pointerId) return;
+    resize = undefined;
+    const handle = event.currentTarget as HTMLButtonElement;
+    if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+  }
+
+  function resizeWithKeyboard(event: KeyboardEvent, key: string) {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    measureColumnWidths();
+    columnWidths[key] = Math.max(minimumColumnWidth, columnWidths[key] + (event.key === 'ArrowRight' ? 16 : -16));
+  }
+
   /** Builds the sparse logical-offset lookup used by currently mounted virtual rows. */
   function indexPages(pages: RowPage[]) {
     const rows = new Map<string, LogRow>();
@@ -193,24 +269,25 @@
   function minBigInt(left: bigint, right: bigint) { return left < right ? left : right; }
 </script>
 
-<section class="flex h-full min-h-0 flex-col bg-background" aria-label="Log output">
+<section class="flex h-full min-h-0 flex-col bg-background" class:resizing={resize !== undefined} aria-label="Log output">
   <div class="min-h-0 flex-1 overflow-x-auto">
     <div
-      class="flex h-full min-w-full flex-col"
-      style={`width: max(100%, ${minimumTableWidth});`}
+      class="flex h-full flex-col"
+      style={`width: ${tableWidth};`}
       role="table"
       aria-label="Log records"
       aria-busy={viewer.pending !== undefined}
       aria-colcount={columns.length}
     >
       <div
-        class="grid h-9 shrink-0 items-center border-b bg-table-header px-3 font-mono text-xs font-medium tracking-[0.04em] text-muted-foreground"
+        bind:this={headerElement}
+        class="grid h-9 shrink-0 border-b bg-table-header font-mono text-xs font-medium tracking-[0.04em] text-muted-foreground"
         style={`grid-template-columns: ${gridTemplate};`}
         role="rowgroup"
       >
         <div role="row" class="contents">
           {#each columns as column, index (`${index}:${column.path}`)}
-            <div class="flex min-w-0 items-center gap-2 pr-4" role="columnheader">
+            <div class="relative flex min-w-0 items-center gap-2 border-r px-3" role="columnheader">
               <span class="min-w-0 flex-1 truncate" title={column.path}>{column.path}</span>
               {#if isDateColumnPath(column.path)}
                 <label class="shrink-0">
@@ -228,6 +305,18 @@
                   </select>
                 </label>
               {/if}
+              <button
+                type="button"
+                class="resize-handle"
+                class:active={resize?.key === `${index}:${column.path}`}
+                aria-label={`Resize ${column.path} column`}
+                onpointerdown={event => startResize(event, `${index}:${column.path}`)}
+                onpointermove={moveResize}
+                onpointerup={endResize}
+                onpointercancel={endResize}
+                onlostpointercapture={endResize}
+                onkeydown={event => resizeWithKeyboard(event, `${index}:${column.path}`)}
+              ></button>
             </div>
           {/each}
         </div>
@@ -253,7 +342,7 @@
               {@const row = rowsByOffset.get(logicalIndex.toString())}
               {@const isSelected = row !== undefined && row.id === selectedRowId}
               <div
-                class={`absolute left-0 top-0 grid w-full items-center border-b border-border/70 px-3 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${isSelected ? 'bg-accent' : 'hover:bg-row-hover'}`}
+                class={`absolute left-0 top-0 grid w-full border-b border-border/70 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${isSelected ? 'bg-accent' : 'hover:bg-row-hover'}`}
                 style={`height: ${item.size}px; transform: translateY(${item.start}px); grid-template-columns: ${gridTemplate};`}
                 role="row"
                 aria-busy={row === undefined}
@@ -269,15 +358,19 @@
                     {@const value = resolveRowColumnValue(row, column.path)}
                     {@const formatted = formatColumnValue(value, column.dateFormat)}
                     <span
-                      class={`truncate pr-4 ${value === undefined ? 'text-muted-foreground/70' : 'text-foreground'}`}
+                      class={`flex min-w-0 items-center border-r border-border/70 px-3 ${value === undefined ? 'text-muted-foreground/70' : 'text-foreground'}`}
                       role="cell"
                       title={value === undefined ? 'Not present' : formatted}
                       aria-label={value === undefined ? `${column.path}: not present` : undefined}
-                    >{formatted}</span>
+                    >
+                      <span class={rowLines === 2 ? 'line-clamp-2 whitespace-pre-wrap leading-4 [overflow-wrap:anywhere]' : 'truncate leading-4'}>{formatted}</span>
+                    </span>
                   {/each}
                 {:else}
                   {#each columns as _, index (index)}
-                    <span class="mr-8 h-2.5 animate-pulse rounded-sm bg-placeholder" role="cell" aria-hidden="true"></span>
+                    <span class="flex min-w-0 items-center border-r border-border/70 px-3" role="cell" aria-hidden="true">
+                      <span class="mr-5 h-2.5 w-full animate-pulse rounded-sm bg-placeholder"></span>
+                    </span>
                   {/each}
                 {/if}
               </div>
@@ -288,3 +381,28 @@
     </div>
   </div>
 </section>
+
+<style>
+  .resize-handle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 6px;
+    cursor: col-resize;
+    touch-action: none;
+  }
+
+  .resize-handle:hover,
+  .resize-handle:focus-visible,
+  .resize-handle.active {
+    background: var(--color-ring);
+    outline: none;
+  }
+
+  .resizing,
+  .resizing :global(*) {
+    cursor: col-resize !important;
+    user-select: none;
+  }
+</style>

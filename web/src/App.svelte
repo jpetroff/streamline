@@ -5,6 +5,7 @@
   import RawOutput from '$lib/components/RawOutput.svelte';
   import SearchEditor from '$lib/components/SearchEditor.svelte';
   import RowDetailPanel from '$lib/components/RowDetailPanel.svelte';
+  import TableToolbar from '$lib/components/TableToolbar.svelte';
   import VirtualLogTable from '$lib/components/VirtualLogTable.svelte';
   import { ViewerController } from '$lib/transport/viewer-controller';
   import type { LogRow } from '$lib/transport/types';
@@ -22,6 +23,7 @@
   let columns = $state(configureColumns(DEFAULT_COLUMNS));
   let columnPaths = $derived(columns.map(column => column.path));
   let selectedRow = $state<SelectedRow>();
+  let rowLines = $state<1 | 2>(1);
 
   // Own the controller for exactly the lifetime of the root Svelte component.
   onMount(() => {
@@ -111,6 +113,7 @@
               {viewer}
               {controller}
               {columns}
+              {rowLines}
               onDateFormatChange={setDateFormat}
               selectedRowId={selectedRow?.row.id}
               onOpenDetails={openDetails}
@@ -123,6 +126,7 @@
       {/if}
     </div>
     {#if viewer.session?.inputKind === 'records'}
+      <TableToolbar bind:rowLines />
       <SearchEditor
         applied={viewer.displayed?.search}
         pending={viewer.pending !== undefined}
