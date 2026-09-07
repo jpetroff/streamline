@@ -71,3 +71,9 @@ export function pageOffsetsForRange(start: bigint, endExclusive: bigint, total: 
 
 function minBigInt(left: bigint, right: bigint) { return left < right ? left : right; }
 function maxBigInt(left: bigint, right: bigint) { return left > right ? left : right; }
+
+/** Bounded segment containing an arbitrary logical target, including unsafe integers. */
+export function segmentForRow(total: bigint, offset: bigint): VirtualSegment {
+  const base = maxBigInt(0n, minBigInt(offset - SEGMENT_SHIFT, total - SEGMENT_ROWS));
+  return { base, count: Number(minBigInt(SEGMENT_ROWS, maxBigInt(0n, total - base))) };
+}

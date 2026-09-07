@@ -1,16 +1,23 @@
 import { expect, type Page } from '@playwright/test';
-import type { InputKind, QueryEvent, QueryState, Session, Snapshot } from '../src/lib/transport/types';
+import type { APIErrorBody, InputKind, QuerySpec, QueryEvent, QueryState, Session, Snapshot } from '../src/lib/transport/types';
 
 /** Deterministic HTTP/SSE boundary; production components and controller run unchanged. */
-export async function mockViewer(page: Page, options: { kind?: InputKind; count?: number; connecting?: boolean } = {}) {
-  let count = options.count ?? 1000;
+export async function mockViewer(page: Page, options: { kind?: InputKind; count?: number | bigint; connecting?: boolean; idStride?: number } = {}) {
+  let count = BigInt(options.count ?? 1000);
+  let queryNumber = 0;
+  let queryId = 'query-1';
+  let rejection: APIErrorBody | undefined;
+  let nextCount: bigint | undefined;
+  const specs: QuerySpec[] = [];
+  const held: { start: bigint; end: bigint; wait: Promise<void>; requested: () => void }[] = [];
+  let rowFailure: bigint | undefined;
   let revision = 1;
   const session: Session = { sessionId: 'test-session', generationId: '1', inputKind: options.kind ?? 'records', inputStatus: 'streaming' };
   const snapshots = new Map<string, Snapshot>();
   function state(): QueryState {
     const snapshot: Snapshot = {
-      sessionId: session.sessionId, generationId: session.generationId, queryId: 'query-1',
-      revision: String(revision), processedThrough: String(count), matchedCount: String(count), snapshotToken: `snapshot-${revision}`,
+      sessionId: session.sessionId, generationId: session.generationId, queryId,
+      revision: String(revision), processedThrough: String(count), matchedCount: String(count), snapshotToken: `${queryId}-snapshot-${revision}`,
     };
     snapshots.set(snapshot.snapshotToken, snapshot);
     return { queryId: snapshot.queryId, status: 'ready', snapshot };
@@ -43,23 +50,45 @@ export async function mockViewer(page: Page, options: { kind?: InputKind; count?
     }
     if (route.request().method() === 'DELETE') return route.fulfill({ status: 204 });
     if (url.pathname.endsWith('/rows')) {
-      const offset = Number(url.searchParams.get('offset'));
+      const offset = BigInt(url.searchParams.get('offset')!);
+      const hold = held.find(item => offset >= item.start && offset < item.end);
+      if (hold) { hold.requested(); await hold.wait; }
+      if (rowFailure === offset) return route.fulfill({ status: 500, json: { error: { code: 'fixture_failure', message: 'Could not load rows.' } } });
       const limit = Number(url.searchParams.get('limit'));
       const snapshot = snapshots.get(url.searchParams.get('snapshot')!)!;
-      const length = Math.max(0, Math.min(limit, Number(snapshot.matchedCount) - offset));
+      const length = Math.max(0, Number(BigInt(limit) < BigInt(snapshot.matchedCount) - offset ? BigInt(limit) : BigInt(snapshot.matchedCount) - offset));
       return route.fulfill({ json: { snapshot, offset: String(offset), rows: Array.from({ length }, (_, i) => ({
-        id: String(offset + i + 1), timestamp: '2026-09-07T12:00:00Z', severity: 'info',
-        message: `Log entry ${offset + i + 1}: ` + 'message text '.repeat(12), sourceFormat: 'json',
+        id: String((offset + BigInt(i + 1)) * BigInt(options.idStride ?? 1)), timestamp: '2026-09-07T12:00:00Z', severity: 'info',
+        message: `Log entry ${offset + BigInt(i + 1)}: ` + 'message text '.repeat(12), sourceFormat: 'json',
         fields: { extra1: 'one', extra2: 'two', extra3: 'three', extra4: 'four', extra5: 'final column' },
       })) } });
+    }
+    if (route.request().method() === 'POST') {
+      specs.push(route.request().postDataJSON());
+      if (rejection) { const error = rejection; rejection = undefined; return route.fulfill({ status: 400, json: { error } }); }
+      queryId = `query-${++queryNumber}`;
+      if (nextCount !== undefined) { count = nextCount; nextCount = undefined; }
     }
     return route.fulfill({ json: state() });
   });
   await page.goto('/');
   return {
     releaseSession,
+    specs,
+    rejectNextQuery(error: APIErrorBody) { rejection = error; },
+    setNextQueryCount(value: bigint) { nextCount = value; },
+    failRowsAt(offset?: bigint) { rowFailure = offset; },
+    holdRows(start: bigint, end: bigint) {
+      let release!: () => void;
+      let requested!: () => void;
+      const wait = new Promise<void>(resolve => { release = resolve; });
+      const seen = new Promise<void>(resolve => { requested = resolve; });
+      const hold = { start, end, wait, requested };
+      held.push(hold);
+      return { seen, release() { held.splice(held.indexOf(hold), 1); release(); } };
+    },
     async append(amount: number) {
-      count += amount;
+      count += BigInt(amount);
       revision++;
       const event: QueryEvent = { type: 'snapshot', state: state(), session };
       await page.evaluate(event => window.dispatchEvent(new CustomEvent('fixture-query-event', { detail: event })), event);

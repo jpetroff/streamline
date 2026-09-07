@@ -11,6 +11,8 @@ export class ViewerController {
   private requestedSpec: QuerySpec = { filter: [], sort: 'input' };
   private intent = 0;
   private rangeRequest = 0;
+  private followRequest = 0;
+  private rangeError?: APIErrorBody;
   private abort?: AbortController;
   private activeEvents?: EventConnection;
   private pendingEvents?: EventConnection;
@@ -69,6 +71,7 @@ export class ViewerController {
     this.requestedSpec = spec;
     const intent = ++this.intent;
     this.rangeRequest++;
+    this.rangeError = undefined;
     this.activeRange = undefined;
     this.rawLoad = undefined;
     this.lastLoadedRangeKey = undefined;
@@ -116,11 +119,13 @@ export class ViewerController {
         if (!this.current(intent) || request !== this.rangeRequest) return;
         const current = this.state.displayed;
         if (current?.queryId !== snapshot.queryId || current.snapshot.snapshotToken !== snapshot.snapshotToken) return;
-        this.dispatch({ type: 'pagesLoaded', snapshot, pages });
+        this.dispatch({ type: 'pagesLoaded', snapshot, pages, clearError: this.state.error === this.rangeError });
+        this.rangeError = undefined;
         this.lastLoadedRangeKey = key;
       } catch (error) {
         if (!this.current(intent) || request !== this.rangeRequest || isAbort(error)) return;
         const body = errorBody(error);
+        this.rangeError = body;
         if (error instanceof TransportError && (error.code === 'snapshot_invalid' || error.status === 404)) {
           this.dispatch({ type: 'refreshRequired', error: body });
         } else {
@@ -163,23 +168,26 @@ export class ViewerController {
 
   /** Pins the currently displayed snapshot while ingestion and query evaluation continue. */
   pause() {
+    this.followRequest++;
     if (this.state.following) this.dispatch({ type: 'pause' });
   }
 
   /** Resynchronizes and moves the display to the latest matching tail. */
   async resume() {
+    const followRequest = ++this.followRequest;
     const displayed = this.state.displayed;
     if (!displayed || this.state.following) return;
     const intent = this.intent;
     try {
       const latest = await this.api.get(displayed.queryId);
-      if (latest.status !== 'ready' || !latest.snapshot || !this.current(intent)) return;
+      if (latest.status !== 'ready' || !latest.snapshot || !this.current(intent) || followRequest !== this.followRequest) return;
       const pages = await this.initialPages(latest.snapshot, false, intent);
-      if (!this.current(intent) || this.state.displayed?.queryId !== displayed.queryId) return;
+      if (!this.current(intent) || followRequest !== this.followRequest || this.state.displayed?.queryId !== displayed.queryId) return;
       this.lastLoadedRangeKey = undefined;
       this.requestedRevision.set(displayed.queryId, BigInt(latest.snapshot.revision));
       this.dispatch({ type: 'resume', snapshot: latest.snapshot, pages });
     } catch (error) {
+      if (!this.current(intent) || followRequest !== this.followRequest) return;
       if (error instanceof TransportError && error.status === 404) {
         this.dispatch({ type: 'refreshRequired', error: errorBody(error) });
       } else if (!isAbort(error)) {
@@ -262,10 +270,9 @@ export class ViewerController {
     if (!replacing && !this.state.following) return;
     if (revision <= (this.requestedRevision.get(query.queryId) ?? -1n)) return;
     this.requestedRevision.set(query.queryId, revision);
-    const atHead = replacing && !this.state.following;
     let pages;
     try {
-      pages = await this.initialPages(snapshot, atHead, intent);
+      pages = await this.initialPages(snapshot, false, intent);
     } catch (error) {
       if (this.requestedRevision.get(query.queryId) === revision) this.requestedRevision.delete(query.queryId);
       throw error;

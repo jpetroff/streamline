@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
+  import { provideKeyboard, registerCommand } from '$lib/keyboard-context';
+  import type { ActiveRow, RowNavigator } from '$lib/row-navigation';
   import { configureColumns, DEFAULT_COLUMNS, type DateDisplayFormat } from '$lib/columns';
   import ColumnSidebar from '$lib/components/ColumnSidebar.svelte';
   import RawOutput from '$lib/components/RawOutput.svelte';
@@ -10,21 +12,18 @@
   import SidePanel from '$lib/components/SidePanel.svelte';
   import { COLUMNS_PANEL, ROW_DETAILS_PANEL } from '$lib/side-panels';
   import { ViewerController } from '$lib/transport/viewer-controller';
-  import type { LogRow } from '$lib/transport/types';
   import type { ViewerState } from '$lib/transport/viewer-state';
 
-  interface SelectedRow {
-    row: LogRow;
-    queryId: string;
-    generationId: string;
-  }
-
+  const keyboard = provideKeyboard();
+  let activeRow = $state.raw<ActiveRow>();
+  let navigator = $state<RowNavigator>();
+  let previewOpen = $state(false);
   const controller = new ViewerController();
   let viewer = $state<ViewerState>(controller.state);
   let source = $state('stdin');
   let columns = $state(configureColumns(DEFAULT_COLUMNS));
   let columnPaths = $derived(columns.map(column => column.path));
-  let selectedRow = $state<SelectedRow>();
+
   let rowLines = $state<1 | 2>(1);
   let columnsOpen = $state(COLUMNS_PANEL.initiallyOpen);
   let columnsPanelWidth = $state<number>();
@@ -40,24 +39,22 @@
     };
   });
 
-  // Details survive virtual page rotation, but never cross query or input generations.
-  $effect(() => {
-    const selection = selectedRow;
-    const displayed = viewer.displayed;
-    if (!selection) return;
-    if (
-      viewer.session?.inputKind !== 'records' ||
-      !displayed ||
-      displayed.queryId !== selection.queryId ||
-      displayed.snapshot.generationId !== selection.generationId
-    ) selectedRow = undefined;
-  });
+  onMount(() => keyboard.attach(window));
+  registerCommand({ id: 'columns.show', label: 'Show columns', handler: async () => { columnsOpen = true; await tick(); } });
+  registerCommand({ id: 'preview.close', label: 'Close preview', bindings: ['Escape'], allowInInput: true,
+    priority: 10, when: () => previewOpen, handler: () => {
+      const ownedFocus = document.activeElement?.closest('#row-details-panel');
+      previewOpen = false;
+      if (ownedFocus) void navigator?.focus();
+    } });
+  registerCommand({ id: 'rows.focus', label: 'Return to active row', bindings: ['Escape'], allowInInput: true,
+    when: () => !!activeRow && !previewOpen, changesFocus: true, handler: async () => { await navigator?.focus(); } });
 
-  function openDetails(row: LogRow) {
+  $effect(() => {
     const displayed = viewer.displayed;
-    if (!displayed) return;
-    selectedRow = { row, queryId: displayed.queryId, generationId: displayed.snapshot.generationId };
-  }
+    if (viewer.session?.inputKind !== 'records' || !displayed) activeRow = undefined;
+    if (!displayed || activeRow?.queryId !== displayed.queryId || activeRow?.generationId !== displayed.snapshot.generationId) previewOpen = false;
+  });
 
   function applyColumns(paths: string[]) {
     columns = configureColumns(paths, columns);
@@ -119,12 +116,14 @@
             {columns}
             {rowLines}
             onDateFormatChange={setDateFormat}
-            selectedRowId={selectedRow?.row.id}
-            onOpenDetails={openDetails}
+            bind:activeRow
+            bind:navigator
+            onReset={() => { previewOpen = false; }}
+            onOpenDetails={() => { previewOpen = true; }}
           />
         {/if}
       </div>
-      <TableToolbar bind:rowLines bind:columnsOpen showRowControls={viewer.session?.inputKind === 'records'} />
+      <TableToolbar bind:rowLines bind:columnsOpen showRowControls={viewer.session?.inputKind === 'records'} total={BigInt(viewer.displayed?.snapshot.matchedCount ?? 0)} {activeRow} {navigator} />
       {#if viewer.session?.inputKind === 'records'}
         <SearchEditor
           applied={viewer.displayed?.search}
@@ -133,9 +132,10 @@
         />
       {/if}
     </main>
-    <SidePanel definition={ROW_DETAILS_PANEL} open={selectedRow !== undefined} bind:preferredWidth={detailsPanelWidth}>
-      {#if selectedRow}
-        <RowDetailPanel row={selectedRow.row} {columns} onClose={() => { selectedRow = undefined; }} />
+    <SidePanel definition={ROW_DETAILS_PANEL} open={previewOpen} bind:preferredWidth={detailsPanelWidth}>
+      {#if previewOpen}
+        <RowDetailPanel row={activeRow?.row} error={viewer.error?.message} {columns} onClose={() => { void keyboard.execute('preview.close'); }} />
+
       {/if}
     </SidePanel>
   </div>

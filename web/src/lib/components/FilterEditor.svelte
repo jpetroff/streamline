@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { untrack, type Snippet } from 'svelte';
+  import { registerCommand, registerOverlay } from '$lib/keyboard-context';
+  import { untrack, tick, type Snippet } from 'svelte';
   import { Dialog } from 'bits-ui';
   import { cloneFilters, FILTER_OPERATORS, filtersEqual, isNumericOperator, parseFilterJSON, validateFilters, visibleFilterErrors, type FilterRejection } from '$lib/filters';
   import type { APIErrorBody, FilterError, FilterSpec } from '$lib/transport/types';
@@ -26,6 +27,28 @@
   const button = 'rounded border px-2 py-1.5 text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40';
   const input = 'w-full min-w-0 rounded border border-input bg-background px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-ring';
 
+  let scope: HTMLElement;
+  let importScope = $state<HTMLElement | null>(null);
+  let addButton: HTMLButtonElement;
+  const keyboard = registerCommand({ id: 'filters.add', label: 'Add filter', bindings: ['Mod+Alt+F'], allowInInput: true, changesFocus: true,
+    when: () => !disabled, handler: async () => { await keyboard.execute('columns.show'); await addRow(); } });
+  registerCommand({ id: 'filters.apply', label: 'Apply filters', bindings: ['Mod+Enter'], scope: () => scope, allowInInput: true, handler: apply });
+  registerCommand({ id: 'filters.import', label: 'Import filters', bindings: ['Mod+Enter'], scope: () => importScope ?? undefined, allowInInput: true, handler: importFilters });
+  registerOverlay({ open: () => importOpen, modal: true, contains: target => !!importScope?.contains(target as Node), close: () => { importOpen = false; } });
+
+  async function focusField(id?: number) {
+    await tick();
+    const field = id === undefined ? addButton : scope.querySelector<HTMLInputElement>(`[data-filter-id="${id}"]`);
+    field?.focus();
+    field?.scrollIntoView({ block: 'nearest' });
+  }
+  async function addRow() {
+    const id = nextID++;
+    rows = [...rows, { id, field: '', op: 'eq', value: '' }];
+    clearFeedback();
+    await focusField(id);
+  }
+
   $effect(() => {
     const previous = rejection;
     if (!previous) return;
@@ -34,7 +57,13 @@
   });
 
   function clearFeedback() { copyStatus = ''; }
-  function removeRow(id: number) { rows = rows.filter(row => row.id !== id); rejection = undefined; clearFeedback(); }
+  function removeRow(id: number) {
+    const index = rows.findIndex(row => row.id === id);
+    rows = rows.filter(row => row.id !== id);
+    rejection = undefined;
+    clearFeedback();
+    void focusField(rows[index]?.id ?? rows[index - 1]?.id);
+  }
   function importFilters() {
     const result = parseFilterJSON(importText);
     importErrors = result.errors;
@@ -71,7 +100,7 @@
   }
 </script>
 
-<section class="border-t pt-3" aria-label="Filters">
+<section bind:this={scope} class="border-t pt-3" aria-label="Filters">
   <div class="flex items-center gap-2"><h2 class="text-sm font-semibold">Filters</h2>{@render helper()}</div>
   <p class="mt-1 text-xs leading-5 text-muted-foreground">All conditions must match, in order. Paths use original JSON fields. Text ignores case.</p>
   {#if rows.length === 0}<p class="my-3 text-xs text-muted-foreground">No filters. Add a condition or import JSON.</p>{/if}
@@ -81,8 +110,7 @@
       <fieldset class="min-w-0 space-y-2 rounded-md border p-2" aria-describedby={`filter-errors-${row.id}`}>
         <legend class="px-1 text-xs text-muted-foreground">Filter {index + 1}</legend>
         <div class="flex gap-2">
-          <label class="min-w-0 flex-1"><span class="sr-only">Field for filter {index + 1}</span><input class={input} bind:value={row.field} oninput={clearFeedback} placeholder="request.host" spellcheck={false} aria-invalid={rowErrors.some(error => error.property === 'field')} /></label>
-          <button type="button" class={button} onclick={() => removeRow(row.id)} aria-label={`Remove filter ${index + 1}`}>×</button>
+          <label class="min-w-0 flex-1"><span class="sr-only">Field for filter {index + 1}</span><input data-filter-id={row.id} class={input} bind:value={row.field} oninput={clearFeedback} placeholder="request.host" spellcheck={false} aria-invalid={rowErrors.some(error => error.property === 'field')} /></label>
         </div>
         <label class="block"><span class="sr-only">Operator for filter {index + 1}</span><select class={input} bind:value={row.op} onchange={clearFeedback}>{#each FILTER_OPERATORS as operator}<option value={operator.value}>{operator.label}</option>{/each}</select></label>
         <label class="block"><span class="sr-only">Value for filter {index + 1}</span>
@@ -92,18 +120,18 @@
             <textarea class={`${input} min-h-14 resize-y font-mono`} rows="2" bind:value={row.value} oninput={clearFeedback} placeholder={row.op === 'regex' ? '^error|timeout$' : 'Text value'} spellcheck={false} aria-invalid={rowErrors.some(error => error.property === 'value')}></textarea>
           {/if}
         </label>
+        <button type="button" class={button} onclick={() => removeRow(row.id)} aria-label={`Remove filter ${index + 1}`}>×</button>
         <div id={`filter-errors-${row.id}`} class="text-xs text-destructive" aria-live="polite">{#each rowErrors as error}<p>{error.message}</p>{/each}</div>
       </fieldset>
     {/each}
   </div>
   <div class="mt-3 flex flex-wrap gap-2">
-    <button type="button" class={button} onclick={() => { rows = [...rows, { id: nextID++, field: '', op: 'eq', value: '' }]; clearFeedback(); }}>Add filter</button>
     <button type="button" class={button} disabled={rows.length === 0} onclick={() => { rows = []; rejection = undefined; clearFeedback(); }}>Clear all</button>
     <Dialog.Root bind:open={importOpen} onOpenChange={open => { if (open) { importText = ''; importErrors = []; } }}>
       <Dialog.Trigger class={button}>Import JSON</Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Overlay class="fixed inset-0 z-50 bg-black/60" />
-        <Dialog.Content class="fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-[min(36rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 overflow-auto rounded-lg border bg-popover p-4 text-popover-foreground shadow-xl">
+        <Dialog.Content bind:ref={importScope} class="fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-[min(36rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 overflow-auto rounded-lg border bg-popover p-4 text-popover-foreground shadow-xl">
           <Dialog.Title class="text-sm font-semibold">Import filters</Dialog.Title>
           <Dialog.Description class="text-xs leading-5 text-muted-foreground">Paste an array of field, op, and value objects. Import replaces your draft; Apply updates the results.</Dialog.Description>
           <label for="filter-json" class="text-xs">Filter JSON</label>
@@ -117,7 +145,9 @@
   </div>
   <div class="mt-3 flex items-center justify-between gap-2">
     <p class="text-xs text-muted-foreground" role="status">{disabled ? 'Filters apply to structured log entries.' : filtersEqual(draft, applied) ? `${applied.length} active` : 'Unapplied changes'}</p>
-    <button type="button" class="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40" disabled={!canApply} onclick={() => void apply()}>{requesting || pending ? 'Applying…' : 'Apply'}</button>
+    <button type="button" class="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40" aria-keyshortcuts={keyboard.aria('Mod+Enter')} title={keyboard.label('Mod+Enter')} disabled={!canApply} onclick={() => void apply()}>{requesting || pending ? 'Applying…' : 'Apply'}</button>
   </div>
   <p class="mt-1 text-xs text-muted-foreground" role="status">{copyStatus}</p>
+  <button bind:this={addButton} type="button" class={`${button} mt-3`} disabled={disabled} onclick={() => void addRow()}
+    aria-keyshortcuts={keyboard.aria('Mod+Alt+F')} title={keyboard.label('Mod+Alt+F')}>Add filter</button>
 </section>

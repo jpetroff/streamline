@@ -360,3 +360,50 @@ test('rejected filters preserve displayed results and roll back options used by 
   await search;
   controller.dispose();
 });
+
+test('pausing invalidates a resume response already in flight', async () => {
+  const api = new RangeAPI();
+  const controller = new ViewerController(api);
+  await controller.start();
+  controller.pause();
+  const pending = deferred<QueryState>();
+  api.get = () => pending.promise;
+  const resumed = controller.resume();
+  controller.pause();
+  pending.resolve(ready('range-query', '1020', '2'));
+  await resumed;
+  expect(controller.state.following).toBe(false);
+  expect(controller.state.displayed?.snapshot.matchedCount).toBe('1000');
+  controller.dispose();
+});
+
+test('errors from an obsolete resume do not contaminate the current display', async () => {
+  const api = new RangeAPI();
+  const controller = new ViewerController(api);
+  await controller.start();
+  controller.pause();
+  const pending = deferred<QueryState>();
+  api.get = () => pending.promise;
+  const resumed = controller.resume();
+  controller.pause();
+  pending.reject(new TransportError('snapshot_invalid', 'Expired', 404));
+  await resumed;
+  expect(controller.state.error).toBeUndefined();
+  expect(controller.state.needsRefresh).toBe(false);
+  controller.dispose();
+});
+
+test('replacement queries load their tail and restore following after navigation paused it', async () => {
+  const api = new RangeAPI();
+  const controller = new ViewerController(api);
+  await controller.start();
+  controller.pause();
+  api.calls = [];
+  api.state.queryId = 'replacement-query';
+  api.state.snapshot = ready('replacement-query', '5000').snapshot;
+  await controller.setSearch({ text: 'info', mode: 'plain', operator: 'or' });
+  expect(controller.state.following).toBe(true);
+  expect(api.calls).toContain(4800n);
+  expect(controller.state.displayed?.queryId).toBe('replacement-query');
+  controller.dispose();
+});

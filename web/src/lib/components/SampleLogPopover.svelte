@@ -1,11 +1,15 @@
 <script lang="ts">
+  import { tick } from 'svelte';
+  import { registerOverlay } from '$lib/keyboard-context';
   import { Popover } from 'bits-ui';
   import type { JSONValue } from '$lib/transport/types';
   import type { ViewerState } from '$lib/transport/viewer-state';
   let { fields, viewer, context }: { fields?: Record<string, JSONValue>; viewer: ViewerState; context: string } = $props();
+  let open = $state(false);
+  registerOverlay({ open: () => open, modal: false, contains: () => false, close: async () => { open = false; await tick(); } });
 </script>
 
-<Popover.Root>
+<Popover.Root bind:open>
   <Popover.Trigger aria-label={`Sample log entry for ${context}`} class="inline-flex h-5 w-5 items-center justify-center rounded-full border text-xs text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">?</Popover.Trigger>
   <Popover.Portal>
     <Popover.Content role="dialog" side="right" align="start" sideOffset={8} class="z-50 w-[min(32rem,calc(100vw-2rem))] rounded-md border bg-popover p-3 text-popover-foreground shadow-lg outline-none" aria-label="Sample log entry">

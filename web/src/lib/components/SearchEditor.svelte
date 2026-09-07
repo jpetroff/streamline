@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { registerCommand } from '$lib/keyboard-context';
   import { untrack } from 'svelte';
   import { EMPTY_SEARCH, normalizeSearchText, searchesEqual, validateSearch, visibleServerErrors, type SearchRejection } from '$lib/search';
   import type { APIErrorBody, LineError, SearchSpec } from '$lib/transport/types';
@@ -49,12 +50,10 @@
     }
   }
 
-  function confirmWithKeyboard(event: KeyboardEvent) {
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.isComposing) {
-      event.preventDefault();
-      void apply();
-    }
-  }
+  let scope: HTMLElement;
+  const keyboard = registerCommand({ id: 'search.focus', label: 'Focus search', bindings: ['Mod+F'], allowInInput: true, changesFocus: true,
+    handler: () => { if (textarea && document.activeElement !== textarea) { textarea.focus(); textarea.select(); } } });
+  registerCommand({ id: 'search.apply', label: 'Apply search', bindings: ['Mod+Enter'], scope: () => scope, allowInInput: true, handler: apply });
 
   function syncGutter() {
     if (gutter && textarea) gutter.scrollTop = textarea.scrollTop;
@@ -68,7 +67,7 @@
   }
 </script>
 
-<section class="shrink-0 border-t bg-shell p-3" aria-label="General search">
+<section bind:this={scope} class="shrink-0 border-t bg-shell p-3" aria-label="General search">
   <div class="mb-2 flex flex-wrap items-center gap-3 text-xs">
     <label for="general-search" class="font-semibold">Search</label>
     <div class="inline-flex rounded border border-input" role="group" aria-label="Search mode">
@@ -90,7 +89,7 @@
     <span class="text-muted-foreground">Ignore case · {draft.operator === 'or' ? 'Any line' : 'All lines in one entry'}</span>
     <button type="button" onclick={() => void apply()} disabled={!canApply}
       class="ml-auto rounded bg-primary px-3 py-1.5 font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
-      aria-keyshortcuts="Control+Enter Meta+Enter"
+      aria-keyshortcuts={keyboard.aria('Mod+Enter')} title={keyboard.label('Mod+Enter')}
     >{requesting || pending ? 'Applying…' : 'Apply'}</button>
   </div>
 
@@ -112,7 +111,7 @@
       {/each}
     </div>
     <textarea id="general-search" bind:this={textarea} bind:value={draft.text}
-      onscroll={syncGutter} onkeydown={confirmWithKeyboard} oninput={() => { tooltip = undefined; }}
+      aria-keyshortcuts={keyboard.aria('Mod+F')} title={`Search (${keyboard.label('Mod+F')})`} onscroll={syncGutter} oninput={() => { tooltip = undefined; }}
       wrap="off" spellcheck={false} autocapitalize="off" aria-invalid={errors.length > 0}
       aria-describedby="search-help search-validation"
       placeholder={draft.mode === 'plain' ? 'timeout\nconnection refused' : 'timeout|refused\nstatus=[45][0-9]{2}'}
@@ -120,7 +119,7 @@
     ></textarea>
   </div>
   <div class="mt-1 flex flex-wrap gap-x-3 text-xs leading-5">
-    <p id="search-help" class="text-muted-foreground">One filter per line. Ctrl/Cmd+Enter to apply. Empty search shows all entries allowed by other filters.</p>
+    <p id="search-help" class="text-muted-foreground">One filter per line. {keyboard.label('Mod+Enter')} to apply. Empty search shows all entries allowed by other filters.</p>
     <p id="search-validation" class="text-destructive" aria-live="polite">
       {errorsByLine.size > 0 ? `${errorsByLine.size} invalid ${errorsByLine.size === 1 ? 'line' : 'lines'}. Hover or focus a bullet for details.` : ''}
     </p>

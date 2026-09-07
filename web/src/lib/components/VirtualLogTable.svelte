@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { registerCommand } from '$lib/keyboard-context';
+  import { clampRow, type ActiveRow, type RowNavigator } from '$lib/row-navigation';
   import { get } from 'svelte/store';
   import { tick, untrack } from 'svelte';
   import { createVirtualizer, type Virtualizer, type Rect } from '@tanstack/svelte-virtual';
@@ -17,7 +19,7 @@
     OVERSCAN_ROWS,
     ROW_HEIGHT,
     WRAPPED_ROW_HEIGHT,
-    headSegment,
+    segmentForRow,
     rebasedSegment,
     scrollOffsetForAnchor,
     tailSegment,
@@ -30,7 +32,9 @@
     columns,
     rowLines = 1,
     onDateFormatChange,
-    selectedRowId,
+    activeRow = $bindable(),
+    navigator = $bindable(),
+    onReset,
     onOpenDetails,
   }: {
     viewer: ViewerState;
@@ -38,14 +42,17 @@
     columns: readonly ColumnConfig[];
     rowLines?: 1 | 2;
     onDateFormatChange: (index: number, format: DateDisplayFormat) => void;
-    selectedRowId?: string;
-    onOpenDetails: (row: LogRow) => void;
+    activeRow?: ActiveRow;
+    navigator?: RowNavigator;
+    onReset: () => void;
+    onOpenDetails: () => void;
   } = $props();
   let scrollElement = $state<HTMLDivElement>();
   let headerElement: HTMLDivElement;
   let viewportWidth = $state(0);
   let viewportHeight = $state(0);
   let horizontalOffset = $state(0);
+  let lastVerticalOffset = 0;
   let viewportChanging = $state(false);
   const minimumColumnWidth = 144;
   let columnWidths = $state<Record<string, number>>({});
@@ -55,6 +62,11 @@
   let programmaticScroll = $state(false);
   let resumePending = $state(false);
   let activeSnapshot = '';
+  let identity = '';
+  let wasFollowing = false;
+  let navigationSequence = 0;
+  let selectionPaused = $state(false);
+  let pendingFocus = $state<{ sequence: number; origin: Element | null }>();
   let moveSequence = 0;
   let measuredRowHeight = ROW_HEIGHT;
   let rowHeight = $derived(rowLines === 2 ? WRAPPED_ROW_HEIGHT : ROW_HEIGHT);
@@ -97,21 +109,123 @@
     });
   });
 
-  // A new immutable snapshot selects either its live tail or paused head segment.
+  const keyboard = registerCommand({ id: 'rows.preview', label: 'Open row preview', bindings: ['Shift+Enter'],
+    scope: () => scrollElement, when: () => !!activeRow, handler: () => onOpenDetails() });
+  for (const [suffix, key, delta] of [['up', 'ArrowUp', -1n], ['down', 'ArrowDown', 1n], ['pageUp', 'PageUp', -10n], ['pageDown', 'PageDown', 10n]] as const) {
+    registerCommand({ id: `rows.${suffix}`, label: `Move ${delta} rows`, bindings: [key], scope: () => scrollElement,
+      repeat: true, when: () => total > 0n, handler: () => navigate((activeRow?.offset ?? total - 1n) + delta, true) });
+    registerCommand({ id: `rows.global.${suffix}`, label: `Move ${delta} rows globally`,
+      bindings: [`Ctrl+Alt+${delta === -10n || delta === 10n ? 'Shift+' : ''}${delta < 0n ? 'ArrowUp' : 'ArrowDown'}`],
+      repeat: true, allowInInput: true, when: () => total > 0n,
+      handler: () => navigate((activeRow?.offset ?? total - 1n) + delta, false) });
+  }
+  $effect(() => {
+    navigator = { navigate, focus: async () => { if (activeRow) await navigate(activeRow.offset, true); } };
+    return () => { navigator = undefined; navigationSequence++; };
+  });
+
+  // A replacement query starts at its newest result. Ordinary tail updates retain editor focus.
   $effect(() => {
     const displayed = viewer.displayed;
     const token = displayed?.snapshot.snapshotToken ?? '';
     const following = viewer.following;
     const count = total;
-    if (!displayed) {
-      activeSnapshot = '';
-      if (segmentCount !== 0 || segmentBase !== 0n) void moveSegment({ base: 0n, count: 0 }, 'start');
-      return;
-    }
-    if (token === activeSnapshot) return;
+    const resumed = following && !wasFollowing;
+    wasFollowing = following;
+    if (token === activeSnapshot && !resumed) return;
     activeSnapshot = token;
-    void moveSegment(following ? tailSegment(count) : headSegment(count), following ? 'end' : 'start');
+    untrack(() => {
+      const sequence = ++navigationSequence;
+      const nextIdentity = displayed ? `${displayed.queryId}:${displayed.snapshot.generationId}` : '';
+      if (nextIdentity !== identity) { identity = nextIdentity; selectionPaused = false; onReset(); }
+      if (!displayed || count === 0n) {
+        activeRow = undefined;
+        void moveSegment({ base: 0n, count: 0 }, 'start');
+        return;
+      }
+      const origin = document.activeElement;
+      const ownedFocus = !!scrollElement?.contains(origin);
+      const offset = following ? count - 1n : clampRow(activeRow?.offset ?? count - 1n, count)!;
+      activeRow = { queryId: displayed.queryId, generationId: displayed.snapshot.generationId, offset, row: rowsByOffset.get(String(offset)) };
+      if (ownedFocus) pendingFocus = { sequence, origin };
+      void moveSegment(following ? tailSegment(count) : segmentForRow(count, offset), following ? 'end' : 'start');
+    });
   });
+
+  // Retain the active payload when its page rotates out of the bounded cache.
+  $effect(() => {
+    const active = activeRow;
+    const row = active && rowsByOffset.get(String(active.offset));
+    if (active && row && row.id !== active.row?.id) activeRow = { ...active, row };
+  });
+  const activeMounted = $derived(activeRow !== undefined && $virtualizer.getVirtualItems().some(item => segmentBase + BigInt(item.index) === activeRow!.offset));
+  $effect.pre(() => {
+    const keys = $virtualizer.getVirtualItems().map(item => String(segmentBase + BigInt(item.index)));
+    const focused = document.activeElement as HTMLElement | null;
+    if (focused && scrollElement?.contains(focused) && focused.dataset.offset && !keys.includes(focused.dataset.offset)) scrollElement.focus({ preventScroll: true });
+  });
+
+  // Scroll observers may publish the new range after tick(). Wait until the target
+  // actually mounts, and abandon restoration if the user has focused another editor.
+  $effect(() => {
+    const request = pendingFocus;
+    const offset = activeRow?.offset;
+    if (!request || offset === undefined || !activeMounted) return;
+    void tick().then(() => {
+      if (request.sequence !== navigationSequence || pendingFocus?.sequence !== request.sequence || activeRow?.offset !== offset) return;
+      const row = scrollElement?.querySelector<HTMLElement>(`[data-offset="${offset}"]`);
+      if (!row) return;
+      const focused = document.activeElement;
+      if (focused === request.origin || scrollElement?.contains(focused) || (focused === document.body && request.origin && !request.origin.isConnected)) row.focus({ preventScroll: true });
+      pendingFocus = undefined;
+    });
+  });
+
+  async function navigate(requested: bigint, focus = false) {
+    const displayed = viewer.displayed;
+    const offset = clampRow(requested, total);
+    if (!displayed || offset === undefined) return;
+    const sequence = ++navigationSequence;
+    const originalFocus = document.activeElement;
+    const token = displayed.snapshot.snapshotToken;
+    const current = () => sequence === navigationSequence && viewer.displayed?.snapshot.snapshotToken === token;
+    selectionPaused = offset < total - 1n;
+    // Also invalidate an in-flight resume when another navigation supersedes it.
+    controller.pause();
+    activeRow = { queryId: displayed.queryId, generationId: displayed.snapshot.generationId, offset, row: rowsByOffset.get(String(offset)) };
+    const move = ++moveSequence;
+    programmaticScroll = true;
+    if (offset < segmentBase || offset >= segmentBase + BigInt(segmentCount)) {
+      const segment = segmentForRow(total, offset);
+      segmentBase = segment.base;
+      segmentCount = segment.count;
+    }
+    await tick();
+    if (!current()) return;
+    get(virtualizer).scrollToIndex(Number(offset - segmentBase), { align: 'auto' });
+    await controller.ensureRange(offset, offset + 1n);
+    if (!current()) return;
+    await tick();
+    if (!current()) return;
+    if (focus) pendingFocus = { sequence, origin: originalFocus };
+    finishProgrammaticScroll(move);
+    if (!selectionPaused) await controller.resume();
+  }
+
+  function resumeFromScroll() {
+    if (!scrollElement || programmaticScroll || viewportChanging || !selectionPaused) return;
+    if (segmentBase + BigInt(segmentCount) >= total && scrollElement.scrollTop + scrollElement.clientHeight >= scrollElement.scrollHeight - 1) {
+      selectionPaused = false;
+      void controller.resume();
+    }
+  }
+  function handleScroll() {
+    if (!scrollElement) return;
+    horizontalOffset = scrollElement.scrollLeft;
+    const movedDown = scrollElement.scrollTop > lastVerticalOffset;
+    lastVerticalOffset = scrollElement.scrollTop;
+    if (movedDown) resumeFromScroll();
+  }
 
   // Translate the rendered range into data requests, rebases, and follow transitions.
   $effect(() => {
@@ -140,7 +254,7 @@
     const atTail = base + BigInt(range.endIndex + 1) >= matchedCount;
     if (following && !atTail) {
       controller.pause();
-    } else if (!following && atTail && !resumePending) {
+    } else if (!following && atTail && !selectionPaused && !resumePending) {
       resumePending = true;
       void controller.resume().finally(() => { resumePending = false; });
     }
@@ -244,16 +358,10 @@
     });
   }
 
-  function handleRowClick(event: MouseEvent, row: LogRow | undefined) {
-    if (!row || !event.shiftKey || event.button !== 0) return;
-    event.preventDefault();
-    onOpenDetails(row);
-  }
-
-  function handleRowKeydown(event: KeyboardEvent, row: LogRow | undefined) {
-    if (!row || !event.shiftKey || event.key !== 'Enter') return;
-    event.preventDefault();
-    onOpenDetails(row);
+  function handleRowClick(event: MouseEvent, row: LogRow | undefined, offset: bigint) {
+    if (!row || event.button !== 0) return;
+    void navigate(offset, true);
+    if (event.shiftKey) { event.preventDefault(); onOpenDetails(); }
   }
 
   function preventShiftSelection(event: MouseEvent, row: LogRow | undefined) {
@@ -363,12 +471,15 @@
         </div>
       </div>
     </div>
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex (Stable keyboard focus fallback for virtualized rows.) -->
     <div
       bind:this={scrollElement}
       class="table-viewport relative min-h-0 min-w-0 flex-1"
       role="rowgroup"
       aria-label="Scrollable log records"
-      onscroll={() => { if (scrollElement) horizontalOffset = scrollElement.scrollLeft; }}
+      tabindex={activeMounted ? -1 : 0}
+      onscroll={handleScroll}
+      onwheel={event => { if (event.deltaY > 0) resumeFromScroll(); }}
     >
       <div class="min-h-full" style={`width: ${tableWidth};`}>
         {#if !viewer.displayed}
@@ -388,18 +499,19 @@
             {#each $virtualizer.getVirtualItems() as item (item.key)}
               {@const logicalIndex = segmentBase + BigInt(item.index)}
               {@const row = rowsByOffset.get(logicalIndex.toString())}
-              {@const isSelected = row !== undefined && row.id === selectedRowId}
+              {@const isSelected = logicalIndex === activeRow?.offset}
+              <!-- svelte-ignore a11y_click_events_have_key_events (Row keyboard commands are handled by the shared window capture registry.) -->
               <div
                 class={`absolute left-0 top-0 grid w-full border-b border-border/70 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${isSelected ? 'bg-accent' : 'hover:bg-row-hover'}`}
                 style={`height: ${item.size}px; transform: translateY(${item.start}px); grid-template-columns: ${gridTemplate};`}
                 role="row"
                 aria-busy={row === undefined}
-                aria-selected={row ? isSelected : undefined}
-                aria-keyshortcuts={row ? 'Shift+Enter' : undefined}
-                tabindex={row ? 0 : undefined}
+                aria-current={isSelected ? 'true' : undefined}
+                data-offset={String(logicalIndex)}
+                aria-keyshortcuts={keyboard.aria('Shift+Enter')}
+                tabindex={isSelected ? 0 : -1}
                 onmousedown={event => preventShiftSelection(event, row)}
-                onclick={event => handleRowClick(event, row)}
-                onkeydown={event => handleRowKeydown(event, row)}
+                onclick={event => handleRowClick(event, row, logicalIndex)}
               >
                 {#if row}
                   {#each columns as column, index (`${index}:${column.path}`)}

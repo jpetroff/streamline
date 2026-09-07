@@ -37,7 +37,7 @@ export type ViewerAction =
   | { type: 'progress'; queryId: string; processed: bigint; total: bigint }
   | { type: 'replace'; query: DisplayedQuery }
   | { type: 'extend'; snapshot: Snapshot; pages: RowPage[] }
-  | { type: 'pagesLoaded'; snapshot: Snapshot; pages: RowPage[] }
+  | { type: 'pagesLoaded'; snapshot: Snapshot; pages: RowPage[]; clearError?: boolean }
   | { type: 'rawStart'; generationId: string }
   | { type: 'rawLoading'; generationId: string }
   | { type: 'rawPage'; page: RawChunkPage }
@@ -56,13 +56,13 @@ export function reduceViewer(state: ViewerState, action: ViewerAction): ViewerSt
       const progress = action.total === 0n ? 1 : Number(action.processed * 1000n / action.total) / 1000;
       return { ...state, pending: { ...state.pending, progress } };
     }
-    case 'replace': return { ...state, displayed: action.query, raw: undefined, pending: undefined, error: undefined, needsRefresh: false };
+    case 'replace': return { ...state, following: true, displayed: action.query, raw: undefined, pending: undefined, error: undefined, needsRefresh: false };
     case 'extend':
       if (!state.following || state.displayed?.queryId !== action.snapshot.queryId) return state;
       return { ...state, displayed: { ...state.displayed, snapshot: action.snapshot, pages: action.pages } };
     case 'pagesLoaded':
       if (state.displayed?.queryId !== action.snapshot.queryId || state.displayed.snapshot.snapshotToken !== action.snapshot.snapshotToken) return state;
-      return { ...state, displayed: { ...state.displayed, pages: action.pages } };
+      return { ...state, error: action.clearError ? undefined : state.error, displayed: { ...state.displayed, pages: action.pages } };
     case 'rawStart':
       return { ...state, displayed: undefined, pending: undefined, error: undefined, needsRefresh: false,
         raw: { generationId: action.generationId, chunks: [], nextOffset: '0', loading: false } };

@@ -5,30 +5,25 @@
 
   let {
     row,
+    error,
     columns,
     onClose,
   }: {
-    row: LogRow;
+    row?: LogRow;
+    error?: string;
     columns: readonly ColumnConfig[];
     onClose: () => void;
   } = $props();
 
-  let fullEntry = $derived(formatDetailColumnValue(row.fields ?? row.message));
+  let fullEntry = $derived(formatDetailColumnValue(row?.fields ?? row?.message));
 
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key !== 'Escape') return;
-    event.preventDefault();
-    onClose();
-  }
 </script>
-
-<svelte:window onkeydown={handleKeydown} />
 
 <div class="flex h-full min-h-0 min-w-0 flex-col">
   <header class="flex h-12 shrink-0 items-center justify-between gap-3 border-b px-3">
     <div class="min-w-0">
       <h2 class="text-sm font-semibold">Row details</h2>
-      <p class="truncate font-mono text-[0.6875rem] text-muted-foreground" title={`Row ${row.id}`}>Row {row.id}</p>
+      <p class="truncate font-mono text-[0.6875rem] text-muted-foreground" title={row ? `Row ${row.id}` : undefined}>{row ? `Row ${row.id}` : 'Loading row…'}</p>
     </div>
     <button
       type="button"
@@ -42,6 +37,7 @@
   </header>
 
   <div class="min-h-0 flex-1 overflow-y-auto p-3">
+    {#if row}
     <dl class="space-y-3">
       {#each columns as column, index (`${index}:${column.path}`)}
         {@const value = resolveRowColumnValue(row, column.path)}
@@ -78,5 +74,8 @@
         {/if}
       </div>
     </section>
+    {:else}
+      <p class="text-sm" role="status">{error ?? 'Loading row…'}</p>
+    {/if}
   </div>
 </div>

@@ -78,3 +78,55 @@ The sidebar starts with no filters. Add conditions in the builder, or use **Impo
 Conditions combine with AND in declaration order, before general search. Field names are case-sensitive dotted object paths into the original JSON, with no array indexing. `eq`, `contains`, and `regex` take string operands and match scalar text without case sensitivity. Missing fields, objects, and arrays do not match. Regex uses the same browser syntax checks and authoritative Go validation as search; each value is one expression, including embedded newlines.
 
 `gt`, `gte`, `lt`, and `lte` take JSON number operands and match only numeric source fields, excluding numeric-looking strings. Fields do not need to appear in the sample to be used. For HTTP clients, `POST /api/v1/queries` now accepts the array as its `filter` property alongside `sort` and `search`; the former string expression is no longer accepted. Validation failures return `invalid_filter` with `filterErrors` identifying the one-based filter `index`, `property`, and `message` (index `0` identifies an invalid top-level array).
+
+## Keyboard navigation
+
+`Mod` means Command on macOS and Control on Windows/Linux. Explicit `Ctrl` means
+Control on every platform; `Alt` means Option on macOS.
+
+| Action | Shortcut |
+| --- | --- |
+| Focus search | `Mod+F` |
+| Open sidebar and focus column paths | `Mod+B` |
+| Add a filter and focus its field | `Mod+Alt+F` |
+| Focus Jump to row | `Ctrl+G` |
+| Move one row in the log list | `Up` / `Down` |
+| Move ten rows in the log list | `Page Up` / `Page Down` |
+| Move one row while retaining input focus | `Ctrl+Alt+Up` / `Down` |
+| Move ten rows while retaining input focus | `Ctrl+Alt+Shift+Up` / `Down` |
+| Open the active row's preview | `Shift+Enter` in the log list, or Shift-click a row |
+| Apply the focused search, columns, or filters block | `Mod+Enter` |
+| Execute Jump to row | `Enter` in the jump field, or **Go** |
+| Dismiss overlay, close preview, or return to the active row | `Escape` |
+
+The newest result starts active. Moving to an older row pauses live following,
+even when the newest row is still visible. Moving back to the last row or
+explicitly scrolling to the bottom resumes following. An open preview follows
+the active row. Applying search or filters starts the new results at their newest
+row while keeping keyboard focus in the editor.
+
+Jump uses the **one-based position in the current results**, not the original
+source ID. Invalid positions leave focus in the jump field and explain the valid
+range. Filter Tab order is field, operator, value, remove, then the next filter;
+**Add filter** is the final form action and focuses the newly added field.
+
+Global shortcuts work from active inputs without first blurring. Ordinary arrows,
+selection, Tab, and multiline Enter retain their normal input behavior. Modal
+imports own keyboard focus until dismissed; `Mod+Enter` imports their JSON draft.
+Record shortcuts are unavailable for raw output. Some operating systems reserve
+the global movement combinations; local log-list keys remain available.
+
+### Adding component commands
+
+The root provides a `CommandRegistry` through Svelte context. Components call
+`registerCommand` from `web/src/lib/keyboard-context.ts` during initialization;
+registration and cleanup follow component mounting. Supply a unique ID, label,
+bindings, handler, and optional live `scope`/`when` functions. `allowInInput`
+explicitly enables input shortcuts; `repeat` is reserved for row movement.
+`changesFocus` dismisses registered popovers before the handler executes.
+
+Scoped bindings use the deepest matching element. A single window capture
+listener routes each recognized event once, before input bubbling handlers.
+Unrecognized combinations are untouched; composition and AltGraph are ignored.
+Use `registerOverlay` for modal or popover ownership, `keyboard.execute(id)` for
+programmatic commands, and `keyboard.label` / `keyboard.aria` for platform hints.

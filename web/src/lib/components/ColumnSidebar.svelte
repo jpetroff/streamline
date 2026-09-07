@@ -1,7 +1,8 @@
 <script lang="ts">
   import FilterEditor from './FilterEditor.svelte';
   import SampleLogPopover from './SampleLogPopover.svelte';
-  import { untrack } from 'svelte';
+  import { registerCommand } from '$lib/keyboard-context';
+  import { untrack, tick } from 'svelte';
   import { findSampleFields, parseColumnDraft } from '$lib/columns';
   import type { APIErrorBody, FilterSpec, JSONValue } from '$lib/transport/types';
   import type { ViewerState } from '$lib/transport/viewer-state';
@@ -17,6 +18,12 @@
     onApply: (columns: string[]) => void;
     onApplyFilters: (filters: FilterSpec[]) => Promise<APIErrorBody | undefined>;
   } = $props();
+
+  let columnScope: HTMLDivElement;
+  let textarea: HTMLTextAreaElement;
+  const keyboard = registerCommand({ id: 'columns.focus', label: 'Focus columns', bindings: ['Mod+B'], allowInInput: true, changesFocus: true,
+    handler: async () => { await keyboard.execute('columns.show'); await tick(); textarea.focus(); textarea.scrollIntoView({ block: 'nearest' }); } });
+  registerCommand({ id: 'columns.apply', label: 'Apply columns', bindings: ['Mod+Enter'], scope: () => columnScope, allowInInput: true, handler: applyColumns });
 
   let draft = $state(untrack(() => appliedColumns.join('\n')));
   let gutterElement = $state<HTMLDivElement>();
@@ -54,7 +61,7 @@
 </script>
 
 <section class="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3 text-sidebar-foreground" aria-label="Column configuration">
-  <div class="shrink-0">
+  <div bind:this={columnScope} class="shrink-0">
     <div class="flex items-center gap-2"><h2 class="text-sm font-semibold">Columns</h2><SampleLogPopover fields={sampleFields} {viewer} context="columns" /></div>
     <p id="columns-help" class="mt-1 text-xs leading-5 text-muted-foreground">
       Enter one field per line. <code>timestamp</code>, <code>severity</code>, and <code>message</code> use normalized values;
@@ -74,6 +81,9 @@
       <label for="column-paths" class="sr-only">Column paths</label>
       <textarea
         id="column-paths"
+        bind:this={textarea}
+        aria-keyshortcuts={keyboard.aria('Mod+B')}
+        title={`Column paths (${keyboard.label('Mod+B')})`}
         bind:value={draft}
         onscroll={syncLineNumbers}
         wrap="off"
@@ -90,6 +100,8 @@
       <button
         type="button"
         onclick={applyColumns}
+        aria-keyshortcuts={keyboard.aria('Mod+Enter')}
+        title={keyboard.label('Mod+Enter')}
         disabled={!canApply}
         class="h-8 shrink-0 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
       >

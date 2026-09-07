@@ -167,6 +167,7 @@ contract tests against memory and future persistent providers.
 ## References
 
 - [Frontend visual output](frontend.md)
+- [Keyboard navigation framework](keyboard-navigation.md)
 - [shadcn-svelte](https://www.shadcn-svelte.com/docs)
 - [TanStack Svelte Virtual](https://tanstack.com/virtual/latest/docs/framework/svelte/svelte-virtual)
 - [Journal export formats](https://systemd.io/JOURNAL_EXPORT_FORMATS/)

@@ -11,6 +11,9 @@ browser lifecycle, visible state, scrolling, and DOM projection. It shows a
 waiting state, parsed virtual rows, or terminal raw text according to session
 `inputKind`.
 
+Keyboard command routing, focus ownership, and extension examples are documented
+in [Keyboard navigation framework](keyboard-navigation.md).
+
 ## Source map
 
 | Source | Responsibility |
@@ -140,9 +143,10 @@ controller:
 1. **Adapter synchronization.** Segment count, segment base, and the bound scroll
    element are installed into the virtualizer. `getItemKey` returns the global
    logical offset, so a local index receives the correct identity after rebasing.
-2. **Snapshot positioning.** A new snapshot token selects a tail segment while
-   following or a head segment while paused. `tick()` waits for the new spacer
-   geometry before an imperative scroll.
+2. **Snapshot positioning.** New queries and resumed following select the tail;
+   paused positioning uses a bounded segment around the active offset. `tick()`
+   waits for spacer geometry before scrolling; deferred focus also waits for
+   the target virtual row to mount.
 3. **Range processing.** TanStack's overscanned virtual items become a logical
    data range. The non-overscanned visible range decides segment rebasing and
    whether following should pause or resume.
@@ -223,8 +227,9 @@ The segment constants are:
 | `OVERSCAN_ROWS` | 12 | Hides normal rendering latency above and below the viewport |
 
 A following snapshot starts with `base = max(0, total - 100,000)` and scrolls to
-the final local item. A paused replacement starts at base zero. Only the
-segment-local count is converted to `number`.
+the final local item. Replacement queries restore following at their newest
+result. Arbitrary navigation uses `segmentForRow` around the target offset. Only
+the segment-local count is converted to `number`.
 
 When the visible range approaches a segment boundary, `rebasedSegment` chooses
 the adjacent segment. The component preserves both the first visible logical
@@ -333,11 +338,14 @@ Following means the displayed snapshot may advance to newly announced revisions.
 It does not control ingestion; Go can continue capturing while the browser is
 paused or disconnected.
 
-The visible non-overscanned range controls the mode:
+The visible non-overscanned range and active-row navigation control the mode:
 
 - moving far enough away from the current snapshot tail calls `pause()`;
 - while paused, snapshot notifications do not replace the displayed snapshot;
-- reaching the paused snapshot's final row calls `resume()`;
+- navigating to an older active row sets `selectionPaused`, preventing resume
+  merely because the tail remains visible;
+- returning to the last active row or explicitly scrolling to the bottom calls
+  `resume()`; ordinary viewport following resumes at the tail without that lock;
 - resume reads the current authoritative query state, fetches its latest tail
   page, publishes snapshot and rows atomically, and scrolls to the new tail;
 - segment rebases and snapshot-driven tail positioning are programmatic and
@@ -346,10 +354,10 @@ The visible non-overscanned range controls the mode:
 ```mermaid
 stateDiagram-v2
   [*] --> Following
-  Following --> Paused: visible range leaves snapshot tail
+  Following --> Paused: viewport leaves tail or older row selected
   Following --> Following: newer snapshot / fetch latest tail
   Paused --> Paused: SSE snapshot notification ignored for display
-  Paused --> Resynchronizing: visible range reaches paused tail
+  Paused --> Resynchronizing: return to last row or scroll to bottom
   Resynchronizing --> Following: current state and tail page loaded
   Resynchronizing --> RefreshRequired: query or snapshot expired
   RefreshRequired --> Following: future explicit query rebuild
