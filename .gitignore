@@ -8,3 +8,5 @@ web/dist/
 .DS_Store
 dataset/
 **/__*
+web/playwright-report/
+web/test-results/

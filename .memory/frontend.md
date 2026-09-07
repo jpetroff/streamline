@@ -16,6 +16,8 @@ waiting state, parsed virtual rows, or terminal raw text according to session
 | Source | Responsibility |
 | --- | --- |
 | `web/src/App.svelte` | Root component, controller ownership, full-viewport shell |
+| `web/src/lib/side-panels.ts` | Shared panel definitions, defaults, and sizing policy |
+| `web/src/lib/components/SidePanel.svelte` | Reusable panel shell, visibility, and resizing |
 | `web/src/app.css` | Dark-only tokens, Tailwind theme mapping, viewport containment |
 | `web/src/lib/components/VirtualLogTable.svelte` | Parsed table, Svelte runes, TanStack adapter, scroll/follow behavior |
 | `web/src/lib/components/RawOutput.svelte` | Preformatted raw text and sequential chunk loading |
@@ -28,40 +30,67 @@ waiting state, parsed virtual rows, or terminal raw text according to session
 
 ## Visual shell and containment
 
-`html`, `body`, and `#app` are all exactly the viewport height and hide document
-overflow. `App.svelte` then creates a two-column, two-row CSS grid:
+`html`, `body`, and `#app` occupy the viewport and hide document overflow.
+`App.svelte` places a 48px application toolbar above a horizontal flex layout:
+the Columns/Filters panel, the remaining main region, and the Row details panel.
+Both side panels stretch from the application toolbar to the viewport bottom.
+The central region stacks the table, compact table toolbar, and search editor;
+all three share the width left between the panels. `min-h-0` and `min-w-0` let each region shrink without
+pushing the table's scrollbars outside the visible area.
 
-- row 1 is a 48 px application bar with the stdin source select and spans both columns;
-- column 1 is the empty 224 px sidebar below the bar;
-- the remaining cell is the log surface;
-- `minmax(0, 1fr)`, `min-h-0`, and `min-w-0` allow the log surface to shrink
-  within the grid instead of forcing document-level overflow;
-- the virtual table's row-group element is the only vertical scroll container.
+### Shared side panels
 
-`App.svelte` keeps the sidebar empty. The header contains a native source
-select with stdin active and disabled file/command placeholders.
+`lib/side-panels.ts` owns panel definitions and sizing policy.
+`components/SidePanel.svelte` owns layout, the shared sidebar background and text
+colors, hidden-state handling, and accessible pointer/keyboard resizing. Each definition supplies an ID, label, side,
+initial visibility, and default-width function. A view supplies content,
+controlled `open` state, and optional bound `preferredWidth` in CSS pixels.
+Keep domain state such as selected rows and queries outside this component.
 
-```mermaid
-flowchart TB
-  Viewport["html / body / #app<br/>height: 100%; overflow: hidden"] --> Shell["App grid<br/>columns: 224px + minmax(0, 1fr)<br/>rows: 48px + minmax(0, 1fr)"]
-  Shell --> Top["Application bar<br/>stdin select + disabled placeholders"]
-  Shell --> Sidebar["Empty sidebar<br/>224px"]
-  Shell --> Main["Main log region<br/>min-width/min-height: 0"]
-  Main --> Table["VirtualLogTable<br/>column header + scroll row group"]
-  Table --> Scroller["Only vertical overflow owner"]
-```
+Both panels include their 6px dividers within a strict 33% browser-viewport cap.
+The shared minimum is 240px; the cap wins on narrower windows. Initial widths
+are 18rem for Columns/Filters and `clamp(20rem, 32vw, 30rem)` for details, subject
+to those limits. User-resized pixel widths survive close/reopen and temporary
+viewport clamping. Reload restores defaults; there is no local storage.
 
-The design is dark-only. `:root` declares `color-scheme: dark` and owns the
-semantic OKLCH palette. Tailwind's inline theme maps those variables to utilities
-such as `bg-background`, `bg-shell`, `bg-table-header`, `text-log-level`, and
-`bg-placeholder`. There is no `.dark` selector, media-query negotiation, theme
-toggle, or light fallback.
+Dividers face the table, capture pointers during dragging, and release capture
+and temporary selection/cursor styles on cancellation. Keyboard arrows move the
+divider in 16px steps; Home/End choose minimum/maximum widths. Hidden panels use
+`hidden` and `inert`, occupy no width, and retain mounted editor drafts. The
+Columns/Filters toggle remains in the table toolbar in every input mode. Row
+controls and search appear only for structured logs. Row details still require
+Shift-click or Shift+Enter and close through Close/Escape.
 
-The table uses three matching CSS-grid templates for its header and rows:
-`12rem 7rem minmax(0, 1fr)`. Time and level are fixed-width scan columns. Message
-takes all remaining width and truncates rather than changing row height. Every
-summary row is 32 px high, which is a rendering invariant used by both CSS and
-the virtualization math.
+To add another panel, define its metadata, supply its content and controlled
+state to `SidePanel`, and place it in the intended flex region. Reuse the shared
+policy and divider behavior rather than adding widths or drag handlers to its
+content component. The current shell supports the two existing panels; adding
+more simultaneous panels would also require deciding how to allocate the
+remaining central space.
+
+### Table viewport
+
+The table body row group owns **both** scroll axes. Its wide inner content owns
+the column grid and virtual-row spacer; the scroll container itself always fits
+the remaining table viewport. Native `overflow: scroll` requests persistent
+tracks and `scrollbar-gutter: stable` reserves space. System overlay-scrollbar
+preferences can still hide native tracks.
+
+The 36px header is a separate clipped row group, sized to the body's usable
+`clientWidth` and translated by its `scrollLeft`. Header and rows share column
+widths, including explicit user-resized widths. A ResizeObserver feeds usable
+`clientWidth`/`clientHeight` to TanStack rather than including native scrollbar
+thickness in its measurements. Geometry changes temporarily suppress follow
+transitions and re-anchor a following view at the tail. Paused views retain
+their scroll offset; native scrolling clamps horizontal offsets when available
+width increases. Toggling panels does not remount the table or reset segments.
+
+Summary rows have fixed heights of 24px for one line and 40px for two lines.
+The selected height is used by both CSS and virtualization/anchor arithmetic.
+Columns default to a 12rem minimum with flexible remaining width until resized.
+
+The design is dark-only. `:root` owns the semantic OKLCH palette and declares
+`color-scheme: dark`; Tailwind maps these variables to utility classes.
 
 ## Root component lifecycle
 
@@ -148,9 +177,8 @@ positioned rather than participating in native table layout:
 - the fixed 36 px header is a row group with Time, Level, and Message column
   headers;
 - the scroll container is the body row group;
-- mounted summary rows use `role="row"` and their three values use
+- mounted summary rows use `role="row"` and their configured values use
   `role="cell"`;
-- the time cell contains a semantic `time` element;
 - unloaded rows keep the same geometry and expose `aria-busy` while their
   placeholder bars remain hidden from assistive technology.
 
@@ -181,17 +209,17 @@ A `VirtualSegment` is a browser-sized window over the logical result space:
 
 ```text
 global logical index = segment.base + local virtual index
-segment pixel height = segment.count * 32
+segment pixel height = segment.count * rowHeight
 ```
 
 The segment constants are:
 
 | Constant | Value | Reason |
 | --- | ---: | --- |
-| `SEGMENT_ROWS` | 100,000 | Bounds one scroll surface to 3,200,000 px |
+| `SEGMENT_ROWS` | 100,000 | Bounds one scroll surface to 2,400,000 px (one line), 4,000,000 px (two lines) |
 | `SEGMENT_SHIFT` | 50,000 | Reuses half of the prior segment after rebasing |
 | `SEGMENT_EDGE_ROWS` | 1,000 | Starts rebasing before the user reaches an edge |
-| `ROW_HEIGHT` | 32 px | Makes logical/pixel conversion exact |
+| `ROW_HEIGHT` / `WRAPPED_ROW_HEIGHT` | 24 / 40 px | Makes logical/pixel conversion exact |
 | `OVERSCAN_ROWS` | 12 | Hides normal rendering latency above and below the viewport |
 
 A following snapshot starts with `base = max(0, total - 100,000)` and scrolls to
@@ -204,8 +232,8 @@ row and the partial-row pixel offset:
 
 ```text
 anchor = oldBase + visibleStart
-intraRow = scrollTop - visibleStart * 32
-newScrollTop = (anchor - newBase) * 32 + intraRow
+intraRow = scrollTop - visibleStart * rowHeight
+newScrollTop = (anchor - newBase) * rowHeight + intraRow
 ```
 
 `programmaticScroll` suppresses range-driven pause/resume decisions while the
@@ -386,10 +414,11 @@ rules, or scroll-coordinate transformations should receive annotations.
 
 ## Safe extension rules
 
-- Keep summary rows fixed at 32 px. Supporting wrapped or expanded rows requires
-  TanStack `measureElement` and removal of the fixed anchor equations.
-- When adding a visible column, change the header and row grid templates
-  together and preserve one flexible message/data column.
+- Keep summary rows at the selected fixed height (24px or 40px). Variable-height
+  rows would require measured heights and a different anchor strategy.
+- Keep header and row grid templates synchronized when changing column sizing.
+- Add side panels through the shared definitions and `SidePanel` component;
+  change common limits and interactions there once for all consumers.
 - Continue using global logical offsets as `bigint`. Never convert
   `matchedCount` directly to `number`.
 - Request rows only through `ViewerController.ensureRange`; components should
@@ -408,7 +437,17 @@ rules, or scroll-coordinate transformations should receive annotations.
 unit tests, Go tests, Go vet, and Go formatting. `make build` verifies that Vite
 output embeds in the standalone binary.
 
-Frontend tests cover:
+Install Chromium once with `cd web && bun x playwright install chromium`, then
+run `bun run --filter @streamline/web test:e2e` from the repository root. The
+Playwright suite starts an isolated Vite server on port 5174 and mocks HTTP/SSE
+at the browser boundary, running the real UI and viewer controller. It covers
+panel visibility combinations, resize bounds and keyboard controls, preserved
+drafts/widths, scrollbar containment and header alignment, fixed column widths,
+paused/live behavior in both row heights, and connecting/pending/raw/empty states.
+
+Frontend unit tests cover:
+
+- shared panel width limits, resize directions, and temporary viewport clamping;
 
 - query replacement and stale query responses;
 - 200-row alignment and neighboring-page prefetch;

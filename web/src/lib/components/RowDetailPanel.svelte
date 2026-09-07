@@ -24,11 +24,8 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<aside
-  class="flex h-full w-[clamp(20rem,32vw,30rem)] min-w-0 shrink-0 flex-col border-l bg-card text-card-foreground"
-  aria-label="Row details"
->
-  <header class="flex h-12 shrink-0 items-center justify-between gap-3 border-b px-4">
+<div class="flex h-full min-h-0 min-w-0 flex-col">
+  <header class="flex h-12 shrink-0 items-center justify-between gap-3 border-b px-3">
     <div class="min-w-0">
       <h2 class="text-sm font-semibold">Row details</h2>
       <p class="truncate font-mono text-[0.6875rem] text-muted-foreground" title={`Row ${row.id}`}>Row {row.id}</p>
@@ -82,4 +79,4 @@
       </div>
     </section>
   </div>
-</aside>
+</div>

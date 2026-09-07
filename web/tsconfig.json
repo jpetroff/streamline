@@ -32,7 +32,8 @@
     "src/**/*.ts",
     "src/**/*.svelte",
     "vite.config.ts",
-    "svelte.config.js"
+    "svelte.config.js",
+    "e2e/**/*.ts",
+    "playwright.config.ts"
   ]
 }
-

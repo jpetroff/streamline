@@ -7,6 +7,8 @@
   import RowDetailPanel from '$lib/components/RowDetailPanel.svelte';
   import TableToolbar from '$lib/components/TableToolbar.svelte';
   import VirtualLogTable from '$lib/components/VirtualLogTable.svelte';
+  import SidePanel from '$lib/components/SidePanel.svelte';
+  import { COLUMNS_PANEL, ROW_DETAILS_PANEL } from '$lib/side-panels';
   import { ViewerController } from '$lib/transport/viewer-controller';
   import type { LogRow } from '$lib/transport/types';
   import type { ViewerState } from '$lib/transport/viewer-state';
@@ -24,6 +26,9 @@
   let columnPaths = $derived(columns.map(column => column.path));
   let selectedRow = $state<SelectedRow>();
   let rowLines = $state<1 | 2>(1);
+  let columnsOpen = $state(COLUMNS_PANEL.initiallyOpen);
+  let columnsPanelWidth = $state<number>();
+  let detailsPanelWidth = $state<number>();
 
   // Own the controller for exactly the lifetime of the root Svelte component.
   onMount(() => {
@@ -70,8 +75,8 @@
   <meta name="description" content="Local streaming log viewer" />
 </svelte:head>
 
-<div class="grid h-full grid-cols-[18rem_minmax(0,1fr)] grid-rows-[3rem_minmax(0,1fr)] bg-background text-foreground">
-  <header class="col-span-2 flex items-center border-b bg-shell px-3" aria-label="Application toolbar">
+<div class="flex h-full min-w-0 flex-col bg-background text-foreground">
+  <header class="flex h-12 shrink-0 items-center border-b bg-shell px-3" aria-label="Application toolbar">
     <label for="input-source" class="sr-only">Input source</label>
     <select
       id="input-source"
@@ -84,54 +89,54 @@
       <option value="command" disabled>command</option>
     </select>
   </header>
-  <aside class="min-h-0 border-r bg-sidebar" aria-label="Sidebar">
-    <ColumnSidebar {viewer} appliedColumns={columnPaths} onApply={applyColumns} onApplyFilters={filters => controller.setFilters(filters)} />
-  </aside>
-  <main class="flex min-h-0 min-w-0 flex-col overflow-hidden" aria-label="Streamline">
-    {#if viewer.error}
-      <div class="shrink-0 border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
-        {viewer.error.message}
-      </div>
-    {/if}
-    {#if viewer.session?.error && viewer.session.error.code !== viewer.error?.code}
-      <div class="shrink-0 border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
-        {viewer.session.error.message}
-      </div>
-    {/if}
-
-    <div class="min-h-0 min-w-0 flex-1">
-      {#if !viewer.session}
-        <div class="grid h-full place-items-center px-6 text-sm text-muted-foreground" role="status">Connecting…</div>
-      {:else if viewer.session.inputKind === 'pending'}
-        <div class="grid h-full place-items-center px-6 text-sm text-muted-foreground" role="status">Waiting for stdin…</div>
-      {:else if viewer.session.inputKind === 'raw'}
-        <RawOutput {viewer} {controller} />
-      {:else}
-        <div class="flex h-full min-h-0 min-w-0 overflow-hidden">
-          <div class="min-h-0 min-w-0 flex-1">
-            <VirtualLogTable
-              {viewer}
-              {controller}
-              {columns}
-              {rowLines}
-              onDateFormatChange={setDateFormat}
-              selectedRowId={selectedRow?.row.id}
-              onOpenDetails={openDetails}
-            />
-          </div>
-          {#if selectedRow}
-            <RowDetailPanel row={selectedRow.row} {columns} onClose={() => { selectedRow = undefined; }} />
-          {/if}
+  <div class="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+    <SidePanel definition={COLUMNS_PANEL} open={columnsOpen} bind:preferredWidth={columnsPanelWidth}>
+      <ColumnSidebar {viewer} appliedColumns={columnPaths} onApply={applyColumns} onApplyFilters={filters => controller.setFilters(filters)} />
+    </SidePanel>
+    <main class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="Streamline">
+      {#if viewer.error}
+        <div class="shrink-0 border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
+          {viewer.error.message}
         </div>
       {/if}
-    </div>
-    {#if viewer.session?.inputKind === 'records'}
-      <TableToolbar bind:rowLines />
-      <SearchEditor
-        applied={viewer.displayed?.search}
-        pending={viewer.pending !== undefined}
-        onApply={search => controller.setSearch(search)}
-      />
-    {/if}
-  </main>
+      {#if viewer.session?.error && viewer.session.error.code !== viewer.error?.code}
+        <div class="shrink-0 border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
+          {viewer.session.error.message}
+        </div>
+      {/if}
+
+      <div class="min-h-0 min-w-0 flex-1">
+        {#if !viewer.session}
+          <div class="grid h-full place-items-center px-6 text-sm text-muted-foreground" role="status">Connecting…</div>
+        {:else if viewer.session.inputKind === 'pending'}
+          <div class="grid h-full place-items-center px-6 text-sm text-muted-foreground" role="status">Waiting for stdin…</div>
+        {:else if viewer.session.inputKind === 'raw'}
+          <RawOutput {viewer} {controller} />
+        {:else}
+          <VirtualLogTable
+            {viewer}
+            {controller}
+            {columns}
+            {rowLines}
+            onDateFormatChange={setDateFormat}
+            selectedRowId={selectedRow?.row.id}
+            onOpenDetails={openDetails}
+          />
+        {/if}
+      </div>
+      <TableToolbar bind:rowLines bind:columnsOpen showRowControls={viewer.session?.inputKind === 'records'} />
+      {#if viewer.session?.inputKind === 'records'}
+        <SearchEditor
+          applied={viewer.displayed?.search}
+          pending={viewer.pending !== undefined}
+          onApply={search => controller.setSearch(search)}
+        />
+      {/if}
+    </main>
+    <SidePanel definition={ROW_DETAILS_PANEL} open={selectedRow !== undefined} bind:preferredWidth={detailsPanelWidth}>
+      {#if selectedRow}
+        <RowDetailPanel row={selectedRow.row} {columns} onClose={() => { selectedRow = undefined; }} />
+      {/if}
+    </SidePanel>
+  </div>
 </div>

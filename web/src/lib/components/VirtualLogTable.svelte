@@ -1,7 +1,7 @@
 <script lang="ts">
   import { get } from 'svelte/store';
   import { tick, untrack } from 'svelte';
-  import { createVirtualizer } from '@tanstack/svelte-virtual';
+  import { createVirtualizer, type Virtualizer, type Rect } from '@tanstack/svelte-virtual';
   import {
     DATE_FORMAT_OPTIONS,
     formatColumnValue,
@@ -43,6 +43,10 @@
   } = $props();
   let scrollElement = $state<HTMLDivElement>();
   let headerElement: HTMLDivElement;
+  let viewportWidth = $state(0);
+  let viewportHeight = $state(0);
+  let horizontalOffset = $state(0);
+  let viewportChanging = $state(false);
   const minimumColumnWidth = 144;
   let columnWidths = $state<Record<string, number>>({});
   let resize = $state<{ key: string; pointerId: number; startX: number; startWidth: number }>();
@@ -62,13 +66,14 @@
   let minimumTableWidth = $derived(`calc(${widths.map(width => width === undefined ? '12rem' : `${width}px`).join(' + ') || '0px'})`);
   let tableWidth = $derived(widths.length > 0 && widths.every(width => width !== undefined)
     ? minimumTableWidth
-    : `max(100%, ${minimumTableWidth})`);
+    : `max(${viewportWidth}px, ${minimumTableWidth})`);
 
   const virtualizer = createVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: 0,
     getScrollElement: () => scrollElement ?? null,
     estimateSize: () => ROW_HEIGHT,
     overscan: OVERSCAN_ROWS,
+    observeElementRect: observeViewport,
   });
 
   // Keep the headless virtualizer synchronized with Svelte-owned segment state.
@@ -116,7 +121,7 @@
     const base = segmentBase;
     const count = segmentCount;
     const matchedCount = total;
-    const moving = programmaticScroll;
+    const moving = programmaticScroll || viewportChanging;
     const following = viewer.following;
     if (moving || !viewer.displayed || !range || items.length === 0) return;
 
@@ -142,6 +147,43 @@
 
     if (count === 0) scrollElement?.scrollTo({ top: 0 });
   });
+
+  /** Measure usable space, excluding native scrollbars, for both header and virtualizer. */
+  function observeViewport(instance: Virtualizer<HTMLDivElement, HTMLDivElement>, callback: (rect: Rect) => void) {
+    const element = instance.scrollElement;
+    if (!element) return;
+    let previousWidth = -1;
+    let previousHeight = -1;
+    let frame = 0;
+    const measure = () => untrack(() => {
+      const width = element.clientWidth;
+      const height = element.clientHeight;
+      horizontalOffset = element.scrollLeft;
+      if (width === previousWidth && height === previousHeight) return;
+      previousWidth = width;
+      previousHeight = height;
+      // A geometry change must not be mistaken for scrolling away from the live tail.
+      viewportChanging = true;
+      viewportWidth = width;
+      viewportHeight = height;
+      callback({ width, height });
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (viewer.following && segmentCount > 0 && !programmaticScroll) {
+          instance.scrollToIndex(segmentCount - 1, { align: 'end' });
+        }
+        horizontalOffset = element.scrollLeft;
+        frame = requestAnimationFrame(() => { viewportChanging = false; });
+      });
+    });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }
 
   /** Installs a segment and moves to its first or final logical row after DOM update. */
   async function moveSegment(segment: VirtualSegment, align: 'start' | 'end') {
@@ -269,20 +311,19 @@
   function minBigInt(left: bigint, right: bigint) { return left < right ? left : right; }
 </script>
 
-<section class="flex h-full min-h-0 flex-col bg-background" class:resizing={resize !== undefined} aria-label="Log output">
-  <div class="min-h-0 flex-1 overflow-x-auto">
-    <div
-      class="flex h-full flex-col"
-      style={`width: ${tableWidth};`}
-      role="table"
-      aria-label="Log records"
-      aria-busy={viewer.pending !== undefined}
-      aria-colcount={columns.length}
-    >
+<section class="flex h-full min-h-0 min-w-0 flex-col bg-background" class:resizing={resize !== undefined} aria-label="Log output">
+  <div
+    class="flex min-h-0 min-w-0 flex-1 flex-col"
+    role="table"
+    aria-label="Log records"
+    aria-busy={viewer.pending !== undefined}
+    aria-colcount={columns.length}
+  >
+    <div class="shrink-0 overflow-clip" style:width={`${viewportWidth}px`}>
       <div
         bind:this={headerElement}
         class="grid h-9 shrink-0 border-b bg-table-header font-mono text-xs font-medium tracking-[0.04em] text-muted-foreground"
-        style={`grid-template-columns: ${gridTemplate};`}
+        style={`width: ${tableWidth}; transform: translateX(${-horizontalOffset}px); grid-template-columns: ${gridTemplate};`}
         role="rowgroup"
       >
         <div role="row" class="contents">
@@ -321,10 +362,17 @@
           {/each}
         </div>
       </div>
-
-      <div bind:this={scrollElement} class="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden" role="rowgroup">
+    </div>
+    <div
+      bind:this={scrollElement}
+      class="table-viewport relative min-h-0 min-w-0 flex-1"
+      role="rowgroup"
+      aria-label="Scrollable log records"
+      onscroll={() => { if (scrollElement) horizontalOffset = scrollElement.scrollLeft; }}
+    >
+      <div class="min-h-full" style={`width: ${tableWidth};`}>
         {#if !viewer.displayed}
-          <div class="grid h-full place-items-center px-6 text-sm text-muted-foreground" role="status">
+          <div class="sticky left-0 grid place-items-center px-6 text-sm text-muted-foreground" style:width={`${viewportWidth}px`} style:min-height={`${viewportHeight}px`} role="status">
             {#if viewer.pending}
               Preparing logs{viewer.pending.progress === undefined ? '…' : `… ${Math.round(viewer.pending.progress * 100)}%`}
             {:else}
@@ -332,7 +380,7 @@
             {/if}
           </div>
         {:else if total === 0n}
-          <div class="grid h-full place-items-center px-6 text-sm text-muted-foreground" role="status">
+          <div class="sticky left-0 grid place-items-center px-6 text-sm text-muted-foreground" style:width={`${viewportWidth}px`} style:min-height={`${viewportHeight}px`} role="status">
             No log records.
           </div>
         {:else}
@@ -383,6 +431,12 @@
 </section>
 
 <style>
+  .table-viewport {
+    overflow: scroll;
+    scrollbar-gutter: stable;
+    overflow-anchor: none;
+  }
+
   .resize-handle {
     position: absolute;
     top: 0;
