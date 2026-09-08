@@ -2,13 +2,17 @@ import { validateRegex } from './search';
 import type { FilterError, FilterSpec } from './transport/types';
 
 export const FILTER_OPERATORS = [
-  { value: 'eq', label: 'Equals' }, { value: 'contains', label: 'Contains' },
-  { value: 'regex', label: 'Matches regex' }, { value: 'gt', label: 'Greater than' },
-  { value: 'gte', label: 'Greater or equal' }, { value: 'lt', label: 'Less than' },
-  { value: 'lte', label: 'Less or equal' },
+  { value: 'eq', label: 'Equals' }, { value: 'neq', label: 'Is not equal' },
+  { value: 'contains', label: 'Contains' }, { value: 'not_contains', label: 'Does not contain' },
+  { value: 'regex', label: 'Matches regex' }, { value: 'not_regex', label: 'Does not match regex' },
+  { value: 'gt', label: 'Greater than' }, { value: 'not_gt', label: 'Not greater than' },
+  { value: 'gte', label: 'Greater or equal' }, { value: 'not_gte', label: 'Not greater or equal' },
+  { value: 'lt', label: 'Less than' }, { value: 'not_lt', label: 'Not less than' },
+  { value: 'lte', label: 'Less or equal' }, { value: 'not_lte', label: 'Not less or equal' },
 ] as const;
 
-export function isNumericOperator(op: string) { return ['gt', 'gte', 'lt', 'lte'].includes(op); }
+export function isNumericOperator(op: string) { return ['gt', 'gte', 'lt', 'lte', 'not_gt', 'not_gte', 'not_lt', 'not_lte'].includes(op); }
+export function isRegexOperator(op: string) { return op === 'regex' || op === 'not_regex'; }
 export function cloneFilters(filters: readonly FilterSpec[]): FilterSpec[] { return filters.map(filter => ({ ...filter })); }
 export function filtersEqual(left: readonly FilterSpec[], right: readonly FilterSpec[]) {
   return left.length === right.length && left.every((filter, index) => {
@@ -34,7 +38,7 @@ export function validateFilters(value: unknown): FilterError[] {
     if (isNumericOperator(item.op as string)) {
       if (typeof item.value !== 'number' || !Number.isFinite(item.value)) report('value', 'Numeric operators require a finite number value.');
     } else if (typeof item.value !== 'string') report('value', 'Text operators require a string value.');
-    else if (item.op === 'regex') {
+    else if (isRegexOperator(item.op as string)) {
       const message = validateRegex(item.value);
       if (message) report('value', message);
     }

@@ -61,6 +61,80 @@ func TestTupleOperators(t *testing.T) {
 	}
 }
 
+func TestNegativeTupleOperators(t *testing.T) {
+	cases := []struct {
+		op                string
+		operand           any
+		matches, excludes []any
+	}{
+		{"neq", "error", []any{"err", "", nil, true, json.Number("12.5")}, []any{"ERROR", "error"}},
+		{"neq", "café.*\nsecond", []any{"caféZZ\nsecond"}, []any{"CAFÉ.*\nSECOND"}},
+		{"neq", "null", []any{"", false}, []any{nil, "NULL"}},
+		{"neq", "12.5", []any{json.Number("12"), false}, []any{json.Number("12.5"), 12.5}},
+		{"not_contains", "CAFÉ.*", []any{"café", "", nil}, []any{"A café.*\nSECOND"}},
+		{"not_contains", "", nil, []any{"", "anything", nil}},
+		{"not_regex", "(?s)^café.*second$", []any{"other", "", nil}, []any{"CAFÉ.*\nSECOND"}},
+		{"not_regex", "café.*\nsecond", []any{"other"}, []any{"CAFÉ.*\nSECOND"}},
+		{"not_regex", "(?-i:error)", []any{"ERROR"}, []any{"error"}},
+		{"not_regex", "", nil, []any{"", "anything", nil}},
+		{"not_gt", 12.5, []any{12.0, json.Number("12.5")}, []any{13.0}},
+		{"not_gte", 12.5, []any{12.0}, []any{json.Number("12.5"), 13.0}},
+		{"not_lt", 12.5, []any{json.Number("12.5"), 13.0}, []any{12.0}},
+		{"not_lte", 12.5, []any{13.0}, []any{12.0, json.Number("12.5")}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.op, func(t *testing.T) {
+			predicate, err := (TupleCompiler{}).Compile([]FilterSpec{{Field: "nested.value", Op: tc.op, Value: tc.operand}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			check := func(value any, want bool) {
+				t.Helper()
+				if got := predicate(Record{Fields: map[string]any{"nested": map[string]any{"value": value}}}); got != want {
+					t.Fatalf("operand %#v, source %#v: match = %v, want %v", tc.operand, value, got, want)
+				}
+			}
+			for _, value := range tc.matches {
+				check(value, true)
+			}
+			for _, value := range tc.excludes {
+				check(value, false)
+			}
+			for _, value := range []any{map[string]any{}, []any{"other"}} {
+				check(value, false)
+			}
+			if predicate(Record{}) || predicate(Record{Fields: map[string]any{"nested": map[string]any{}}}) || predicate(Record{Fields: map[string]any{"nested": nil}}) {
+				t.Fatal("missing or untraversable field matched")
+			}
+			if _, numeric := tc.operand.(float64); numeric {
+				for _, value := range []any{"12.5", nil, true, math.NaN(), math.Inf(1)} {
+					check(value, false)
+				}
+			}
+		})
+	}
+}
+
+func TestNegativeTupleValidation(t *testing.T) {
+	for _, op := range []string{"neq", "not_contains", "not_regex", "not_gt", "not_gte", "not_lt", "not_lte"} {
+		for _, value := range []any{nil, true, []any{}, map[string]any{}} {
+			if _, err := (TupleCompiler{}).Compile([]FilterSpec{{Field: "value", Op: op, Value: value}}); err == nil {
+				t.Fatalf("%s accepted operand %#v", op, value)
+			}
+		}
+	}
+	for _, value := range []any{"[", "(?=x)", 10.0} {
+		_, err := (TupleCompiler{}).Compile([]FilterSpec{{Field: "value", Op: "not_regex", Value: value}})
+		if err == nil {
+			t.Fatalf("accepted regex operand %#v", value)
+		}
+		issues := AsAPIError(err).FilterErrors
+		if len(issues) != 1 || issues[0].Index != 1 || issues[0].Property != "value" {
+			t.Fatalf("issues = %#v", issues)
+		}
+	}
+}
+
 func TestTupleValidationReportsEveryFilter(t *testing.T) {
 	var specs []FilterSpec
 	err := json.Unmarshal([]byte(`[null,[],{"field":"","op":"eq","value":false},{"field":"a..b","op":"bad","value":"x"},{"field":"n","op":"gt","value":"10"},{"field":"s","op":"regex","value":"["},{"field":"s","op":"regex","value":"(?=x)"},{"field":"s","op":"eq","value":"x","extra":true},{"field":"s","op":"eq"}]`), &specs)
@@ -120,7 +194,7 @@ func TestTupleFiltersSearchPaginationAndStreaming(t *testing.T) {
 		return Record{Message: message, Fields: map[string]any{"level": level, "duration": json.Number(duration)}}
 	}
 	service.Append([]Record{row("error", "50", "timeout"), row("info", "200", "timeout"), row("error", "200", "ok"), row("ERROR", "200", "timeout")})
-	filters := []FilterSpec{{Field: "level", Op: "eq", Value: "error"}, {Field: "duration", Op: "gte", Value: 100.0}}
+	filters := []FilterSpec{{Field: "level", Op: "neq", Value: "info"}, {Field: "level", Op: "not_contains", Value: "debug"}, {Field: "level", Op: "not_regex", Value: "^warn"}, {Field: "duration", Op: "not_lt", Value: 100.0}}
 	created, err := service.Create(context.Background(), CreateRequest{Filter: filters, Search: &SearchSpec{Text: "timeout"}})
 	if err != nil {
 		t.Fatal(err)

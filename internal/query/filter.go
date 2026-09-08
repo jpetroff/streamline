@@ -78,7 +78,17 @@ func (TupleCompiler) Compile(specs []FilterSpec) (Predicate, error) {
 			report("field", "Enter a nonempty dotted object path.")
 		}
 		var match func(any) bool
-		switch spec.Op {
+		op := spec.Op
+		negate := true
+		switch op {
+		case "neq":
+			op = "eq"
+		case "not_contains", "not_regex", "not_gt", "not_gte", "not_lt", "not_lte":
+			op = strings.TrimPrefix(op, "not_")
+		default:
+			negate = false
+		}
+		switch op {
 		case "eq", "contains", "regex":
 			value, ok := spec.Value.(string)
 			if !ok {
@@ -87,9 +97,9 @@ func (TupleCompiler) Compile(specs []FilterSpec) (Predicate, error) {
 			}
 			var matcher *regexp.Regexp
 			var err error
-			if spec.Op == "eq" {
+			if op == "eq" {
 				matcher, err = compileLine(`\A(?:`+regexp.QuoteMeta(value)+`)\z`, "regexp")
-			} else if spec.Op == "contains" {
+			} else if op == "contains" {
 				matcher, err = compileLine(value, "plain")
 			} else {
 				matcher, err = compileLine(value, "regexp")
@@ -98,14 +108,16 @@ func (TupleCompiler) Compile(specs []FilterSpec) (Predicate, error) {
 				report("value", err.Error())
 				continue
 			}
-			match = func(value any) bool { text, ok := filterText(value); return ok && matcher.MatchString(text) }
+			match = func(value any) bool {
+				text, ok := filterText(value)
+				return ok && (matcher.MatchString(text) != negate)
+			}
 		case "gt", "gte", "lt", "lte":
 			threshold, ok := filterNumber(spec.Value)
 			if !ok {
 				report("value", "Numeric operators require a finite number value.")
 				continue
 			}
-			op := spec.Op
 			match = func(value any) bool {
 				number, ok := filterNumber(value)
 				if !ok {
@@ -113,17 +125,17 @@ func (TupleCompiler) Compile(specs []FilterSpec) (Predicate, error) {
 				}
 				switch op {
 				case "gt":
-					return number > threshold
+					return (number > threshold) != negate
 				case "gte":
-					return number >= threshold
+					return (number >= threshold) != negate
 				case "lt":
-					return number < threshold
+					return (number < threshold) != negate
 				default:
-					return number <= threshold
+					return (number <= threshold) != negate
 				}
 			}
 		default:
-			report("op", "Choose eq, contains, regex, gt, gte, lt, or lte.")
+			report("op", "Choose eq, neq, contains, not_contains, regex, not_regex, gt, not_gt, gte, not_gte, lt, not_lt, lte, or not_lte.")
 			continue
 		}
 		predicates = append(predicates, func(record Record) bool {

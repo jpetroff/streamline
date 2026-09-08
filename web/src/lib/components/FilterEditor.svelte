@@ -2,7 +2,7 @@
   import { registerCommand, registerOverlay } from '$lib/keyboard-context';
   import { untrack, tick, type Snippet } from 'svelte';
   import { Dialog } from 'bits-ui';
-  import { cloneFilters, FILTER_OPERATORS, filtersEqual, isNumericOperator, parseFilterJSON, validateFilters, visibleFilterErrors, type FilterRejection } from '$lib/filters';
+  import { cloneFilters, FILTER_OPERATORS, filtersEqual, isNumericOperator, isRegexOperator, parseFilterJSON, validateFilters, visibleFilterErrors, type FilterRejection } from '$lib/filters';
   import type { APIErrorBody, FilterError, FilterSpec } from '$lib/transport/types';
 
   let { applied = [], pending = false, disabled = false, helper, onApply }: {
@@ -117,7 +117,7 @@
           {#if isNumericOperator(row.op)}
             <input class={input} type="text" inputmode="decimal" bind:value={row.value} oninput={clearFeedback} placeholder="100" aria-invalid={rowErrors.some(error => error.property === 'value')} />
           {:else}
-            <textarea class={`${input} min-h-14 resize-y font-mono`} rows="2" bind:value={row.value} oninput={clearFeedback} placeholder={row.op === 'regex' ? '^error|timeout$' : 'Text value'} spellcheck={false} aria-invalid={rowErrors.some(error => error.property === 'value')}></textarea>
+            <textarea class={`${input} min-h-14 resize-y font-mono`} rows="2" bind:value={row.value} oninput={clearFeedback} placeholder={isRegexOperator(row.op) ? '^error|timeout$' : 'Text value'} spellcheck={false} aria-invalid={rowErrors.some(error => error.property === 'value')}></textarea>
           {/if}
         </label>
         <button type="button" class={button} onclick={() => removeRow(row.id)} aria-label={`Remove filter ${index + 1}`}>×</button>

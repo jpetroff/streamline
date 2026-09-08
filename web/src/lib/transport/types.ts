@@ -112,8 +112,8 @@ export interface QueryEvent {
 
 /** One ordered condition on an original JSON field. */
 export type FilterSpec =
-  | { field: string; op: 'eq' | 'contains' | 'regex'; value: string }
-  | { field: string; op: 'gt' | 'gte' | 'lt' | 'lte'; value: number };
+  | { field: string; op: 'eq' | 'neq' | 'contains' | 'not_contains' | 'regex' | 'not_regex'; value: string }
+  | { field: string; op: 'gt' | 'not_gt' | 'gte' | 'not_gte' | 'lt' | 'not_lt' | 'lte' | 'not_lte'; value: number };
 
 export interface FilterError {
   index: number;

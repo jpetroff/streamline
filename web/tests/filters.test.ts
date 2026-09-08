@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { cloneFilters, filtersEqual, parseFilterJSON, validateFilters, visibleFilterErrors } from '../src/lib/filters';
+import { cloneFilters, FILTER_OPERATORS, filtersEqual, isNumericOperator, parseFilterJSON, validateFilters, visibleFilterErrors } from '../src/lib/filters';
 import type { FilterSpec } from '../src/lib/transport/types';
 
 test('filter JSON round trips preserve order, duplicates, value types, and embedded newlines', () => {
@@ -39,4 +39,31 @@ test('server errors disappear for relevant edits while retaining unrelated error
   filters[0].value = 'x';
   expect(visibleFilterErrors(filters, rejection)).toEqual([]);
   expect(visibleFilterErrors([], rejection)).toEqual([]);
+});
+
+test('negative filters round trip and retain their operand types', () => {
+  const filters: FilterSpec[] = [
+    { field: 'level', op: 'neq', value: 'error' },
+    { field: 'message', op: 'not_contains', value: '[' },
+    { field: 'message', op: 'not_regex', value: '^a\nb$' },
+    { field: 'n', op: 'not_gt', value: 1.5 },
+    { field: 'n', op: 'not_gte', value: 1.5 },
+    { field: 'n', op: 'not_lt', value: 1.5 },
+    { field: 'n', op: 'not_lte', value: 1.5 },
+  ];
+  expect(parseFilterJSON(JSON.stringify(filters))).toEqual({ filters, errors: [] });
+  for (const filter of filters) {
+    expect(FILTER_OPERATORS.some(operator => operator.value === filter.op)).toBe(true);
+    expect(isNumericOperator(filter.op)).toBe(typeof filter.value === 'number');
+    for (const value of [null, false, {}, [], typeof filter.value === 'number' ? '1.5' : 1.5]) {
+      expect(validateFilters([{ ...filter, value }])).toMatchObject([{ index: 1, property: 'value' }]);
+    }
+  }
+});
+
+test('negative regex is validated while negative literal operators allow punctuation', () => {
+  expect(parseFilterJSON(JSON.stringify([{ field: 'a', op: 'not_regex', value: '[' }])).filters).toBeUndefined();
+  expect(validateFilters([{ field: 'a', op: 'not_regex', value: '[' }])).toMatchObject([{ index: 1, property: 'value' }]);
+  for (const op of ['neq', 'not_contains']) expect(validateFilters([{ field: 'a', op, value: '[' }])).toEqual([]);
+  for (const value of ['', '(?=x)']) expect(validateFilters([{ field: 'a', op: 'not_regex', value }])).toEqual([]);
 });
