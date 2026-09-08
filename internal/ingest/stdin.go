@@ -27,8 +27,39 @@ type outcome struct {
 	err    error
 }
 
+// Completion holds terminal input data after all parsed batches have been flushed.
+type Completion struct {
+	Raw *string
+	Err error
+}
+
+// Publish finalizes a source, optionally replacing its read error with a process error.
+func (c Completion) Publish(sink Sink, terminalErr *query.APIError) {
+	status := query.InputEOF
+	if terminalErr == nil && c.Err != nil {
+		terminalErr = &query.APIError{Code: "input_read_error", Message: c.Err.Error()}
+	}
+	if terminalErr != nil {
+		status = query.InputError
+	}
+	if c.Raw != nil {
+		sink.SetRawOutput(*c.Raw, status, terminalErr)
+	} else {
+		sink.SetInputStatus(status, terminalErr)
+	}
+}
+
 // Run progressively parses reader until EOF, error, or context cancellation.
 func Run(ctx context.Context, reader io.Reader, engine *parse.Engine, sink Sink) {
+	completed := Capture(ctx, reader, engine, sink)
+	if ctx.Err() == nil {
+		completed.Publish(sink, nil)
+	}
+}
+
+// Capture flushes parsed input without publishing terminal status. Owners of
+// blocking readers must close them before joining this function on shutdown.
+func Capture(ctx context.Context, reader io.Reader, engine *parse.Engine, sink Sink) Completion {
 	batches := make(chan []parse.CapturedRecord)
 	done := make(chan outcome, 1)
 	go func() {
@@ -62,7 +93,8 @@ func Run(ctx context.Context, reader io.Reader, engine *parse.Engine, sink Sink)
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			flushAll()
+			return Completion{Err: ctx.Err()}
 		case records := <-batches:
 			for _, record := range records {
 				pending = append(pending, record.Entry)
@@ -72,18 +104,11 @@ func Run(ctx context.Context, reader io.Reader, engine *parse.Engine, sink Sink)
 			flushAll()
 		case completed := <-done:
 			flushAll()
-			status := query.InputEOF
-			var inputErr *query.APIError
-			if completed.err != nil {
-				status = query.InputError
-				inputErr = &query.APIError{Code: "input_read_error", Message: completed.err.Error()}
-			}
+			completion := Completion{Err: completed.err}
 			if completed.result != nil && completed.result.Kind == parse.ResultRaw && completed.result.Raw != nil {
-				sink.SetRawOutput(completed.result.Raw.Text, status, inputErr)
-			} else {
-				sink.SetInputStatus(status, inputErr)
+				completion.Raw = &completed.result.Raw.Text
 			}
-			return
+			return completion
 		}
 	}
 }

@@ -9,7 +9,7 @@ export class TransportError extends Error {
 }
 
 /** Decodes a JSON response and normalizes structured API failures. */
-async function responseJSON<T>(response: Response): Promise<T> {
+export async function responseJSON<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = body?.error;
@@ -34,7 +34,7 @@ export interface QueryAPI {
   get(queryId: string, signal?: AbortSignal): Promise<QueryState>;
   /** Fetches a bounded row window from an exact snapshot token. */
   rows(queryId: string, snapshot: string, offset: bigint, limit: number, signal?: AbortSignal): Promise<RowPage>;
-  /** Reads a bounded page of terminal display-safe raw stdin chunks. */
+  /** Reads a bounded page of terminal display-safe raw input chunks. */
   raw(generationId: string, offset: bigint, limit: number, signal?: AbortSignal): Promise<RawChunkPage>;
   /** Subscribes to small state notifications for a query. */
   events(queryId: string, onEvent: (event: QueryEvent) => void, onError: () => void): EventConnection;
@@ -73,7 +73,7 @@ export class HTTPQueryAPI implements QueryAPI {
     return fetch(`${this.baseURL}/queries/${encodeURIComponent(queryId)}/rows?${params}`, { signal }).then(responseJSON<RowPage>);
   }
 
-  /** Reads display-safe raw stdin without transferring the complete output at once. */
+  /** Reads display-safe raw output without transferring the complete output at once. */
   raw(generationId: string, offset: bigint, limit: number, signal?: AbortSignal) {
     const params = new URLSearchParams({ generation: generationId, offset: offset.toString(), limit: String(limit) });
     return fetch(`${this.baseURL}/input/raw?${params}`, { signal }).then(responseJSON<RawChunkPage>);

@@ -3,7 +3,7 @@
   import type { ViewerController } from '$lib/transport/viewer-controller';
   import type { ViewerState } from '$lib/transport/viewer-state';
 
-  let { viewer, controller }: { viewer: ViewerState; controller: ViewerController } = $props();
+  let { viewer, controller, label = 'stdin', stopped = false }: { viewer: ViewerState; controller: ViewerController; label?: string; stopped?: boolean } = $props();
   let scrollElement = $state<HTMLDivElement>();
   let content = $derived(viewer.raw?.chunks.join('') ?? '');
   let complete = $derived(
@@ -26,19 +26,19 @@
   }
 </script>
 
-<section class="flex h-full min-h-0 flex-col bg-background" aria-label="Raw stdin output">
+<section class="flex h-full min-h-0 flex-col bg-background" aria-label={`Raw ${label} output`}>
   <!-- svelte-ignore a11y_no_noninteractive_tabindex (scrollable output must be keyboard-focusable) -->
   <div
     bind:this={scrollElement}
     onscroll={requestMore}
     class="min-h-0 flex-1 overflow-auto"
     role="region"
-    aria-label="Scrollable raw stdin text"
+    aria-label={`Scrollable raw ${label} text`}
     tabindex="0"
   >
     {#if viewer.raw?.totalChunks === '0'}
       <div class="grid h-full place-items-center px-6 text-sm text-muted-foreground" role="status">
-        No stdin output.
+        {label === 'stdin' ? 'No stdin output.' : stopped ? 'Command stopped without output.' : viewer.session?.inputStatus === 'error' ? 'Command failed without output.' : 'Command completed without output.'}
       </div>
     {:else if content === '' && viewer.raw?.loading}
       <div class="grid h-full place-items-center px-6 text-sm text-muted-foreground" role="status">

@@ -41,6 +41,7 @@ export async function mockViewer(page: Page, options: { kind?: InputKind; count?
   if (!options.connecting) releaseSession();
   await page.route('**/api/v1/**', async route => {
     const url = new URL(route.request().url());
+    if (url.pathname === '/api/v1/sources') return route.fulfill({ json: [{ id: 'stdin', kind: 'stdin', mode: 'auto', state: 'running', createdAt: '2026-09-08T00:00:00Z', session }] });
     if (url.pathname.endsWith('/session')) {
       await sessionReady;
       return route.fulfill({ json: session });

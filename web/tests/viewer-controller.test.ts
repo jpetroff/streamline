@@ -407,3 +407,17 @@ test('replacement queries load their tail and restore following after navigation
   expect(controller.state.displayed?.queryId).toBe('replacement-query');
   controller.dispose();
 });
+
+test('a recreated source viewer starts with its saved query and releases late source responses', async () => {
+  const api = new FakeAPI();
+  const controller = new ViewerController(api);
+  const spec: QuerySpec = { filter: [{ field: 'level', op: 'eq', value: 'saved' }], sort: 'input', search: { text: 'failure', mode: 'plain', operator: 'or' } };
+  const started = controller.start(spec);
+  await settle();
+  expect(api.specs[0]).toEqual(spec);
+  controller.dispose();
+  api.creates.get('saved')!.resolve(ready('old-source-query'));
+  await started;
+  expect(controller.state.displayed).toBeUndefined();
+  expect(api.deleted).toContain('old-source-query');
+});

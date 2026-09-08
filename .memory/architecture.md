@@ -4,11 +4,12 @@
 
 | Area | Responsibility |
 | --- | --- |
-| `cmd/streamline` | CLI port, loopback listener, background stdin startup, graceful shutdown |
+| `cmd/streamline` | CLI port, loopback listener, source-manager startup, graceful shutdown |
 | `internal/httpapi` | Versioned session/query JSON endpoints, bounded row/raw pages, SSE state notifications, and health |
 | `internal/query` | In-memory query lifecycle, immutable snapshot boundaries, live result indexes, subscriptions, and compiler boundary |
 | `internal/logmodel` | Universal typed log records, source formats, parser diagnostics, and deep cloning |
-| `internal/ingest` | Progressive stdin coordination, commit batching, EOF/error publication |
+| `internal/source` | Independent stdin/command captures, process groups, lifecycle, source registry |
+| `internal/ingest` | Reader capture, commit batching, deferred terminal publication |
 | `internal/parse` | Streaming framing, terminal sanitization, stream classification, and journald/JSON/text normalization |
 | `internal/webassets` | Embedded frontend in release builds; development build excludes assets |
 | `web` | Svelte 5 viewer controller, HTTP/SSE client, 32 MB page cache, dark application shell, and segmented virtual log table |
@@ -16,17 +17,19 @@
 | Installed for later | ECharts |
 
 The server uses Go's standard library and builds with CGo disabled.
-Stdin ingestion is implemented. No shared filter-expression compiler, profiles,
-or graphs are implemented. The production service supports general plain/regexp
-search in input order; the permanent-filter compiler still accepts only an empty filter.
+Stdin and command ingestion are implemented. The query service applies field
+filters and plain/regexp search in input order. Profiles, graphs, and a shared
+filter-expression syntax remain future work. See [Command log sources](command-sources.md)
+for process ownership, lifecycle diagrams, and debugging entry points.
 See [parser flow and revisitable decisions](parser.md) for the implemented
 normalization boundary.
 
 ## Implemented binary–frontend protocol
 
 All application routes use `/api/v1`. Commands and bounded data use JSON over
-HTTP; SSE only announces authoritative query/session state and never carries log
-rows.
+HTTP; SSE announces source-list and query/session state without log rows.
+The routes below are stdin aliases; each also exists under `/sources/{id}`.
+See [source endpoints](transport.md#independent-command-sources).
 
 | Route | Contract |
 | --- | --- |
@@ -194,3 +197,10 @@ whole-record results; AND requires every line to match in the same record.
 Numbers retain their JSON representation; containers are never concatenated.
 Compilation is once per query, case-insensitive by default, with literal
 expressions escaped through `regexp.QuoteMeta`. Empty search is the identity.
+
+## Command source execution
+
+[Command log sources](command-sources.md) documents manager/process ownership,
+Auto/Text parsing, Stop and shutdown sequencing, source switching, decisions,
+and debugging/tests. [Transport](transport.md#independent-command-sources) owns
+the wire contract; [frontend](frontend.md#source-viewer-lifecycle) owns rendering.

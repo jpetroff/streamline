@@ -5,7 +5,7 @@ dark log table rendered by Svelte. It covers the current frontend shell,
 reactivity, viewport paging, row virtualization, follow behavior, accessibility,
 and the annotation conventions used by the code.
 
-The frontend is a presentation client. Go owns stdin capture, classification,
+The frontend is a presentation client. Go owns stdin/command capture, classification,
 parsing, result indexes, raw chunks, and immutable snapshots. Svelte owns the
 browser lifecycle, visible state, scrolling, and DOM projection. It shows a
 waiting state, parsed virtual rows, or terminal raw text according to session
@@ -18,7 +18,9 @@ in [Keyboard navigation framework](keyboard-navigation.md).
 
 | Source | Responsibility |
 | --- | --- |
-| `web/src/App.svelte` | Root component, controller ownership, full-viewport shell |
+| `web/src/App.svelte` | Source controls/list, selection, preference map, keyboard registry, viewport shell |
+| `web/src/lib/components/SourceViewer.svelte` | Active controller, panels, row selection, save/restore on source switch |
+| `web/src/lib/transport/sources.ts` | Source HTTP/SSE client and saved preference type |
 | `web/src/lib/side-panels.ts` | Shared panel definitions, defaults, and sizing policy |
 | `web/src/lib/components/SidePanel.svelte` | Reusable panel shell, visibility, and resizing |
 | `web/src/app.css` | Dark-only tokens, Tailwind theme mapping, viewport containment |
@@ -34,9 +36,9 @@ in [Keyboard navigation framework](keyboard-navigation.md).
 ## Visual shell and containment
 
 `html`, `body`, and `#app` occupy the viewport and hide document overflow.
-`App.svelte` places a 48px application toolbar above a horizontal flex layout:
-the Columns/Filters panel, the remaining main region, and the Row details panel.
-Both side panels stretch from the application toolbar to the viewport bottom.
+`App.svelte` places the source toolbar and optional command editor/status controls
+above a keyed `SourceViewer`. The viewer is a horizontal flex layout: Columns/Filters,
+main region, and Row details. Panels fill the remaining viewport height.
 The central region stacks the table, compact table toolbar, and search editor;
 all three share the width left between the panels. `min-h-0` and `min-w-0` let each region shrink without
 pushing the table's scrollbars outside the visible area.
@@ -95,20 +97,23 @@ Columns default to a 12rem minimum with flexible remaining width until resized.
 The design is dark-only. `:root` owns the semantic OKLCH palette and declares
 `color-scheme: dark`; Tailwind maps these variables to utility classes.
 
-## Root component lifecycle
+## Source viewer lifecycle
 
-The root creates one `ViewerController` per mounted `App` component and seeds a
+`App` owns source metadata and selection. Each keyed `SourceViewer` creates one
+`ViewerController` and seeds a
 Svelte `$state` value from `controller.state`. During `onMount` it:
 
 1. subscribes to complete immutable `ViewerState` snapshots;
 2. assigns each snapshot to the reactive `viewer` value;
-3. calls `start()`, which reads the session and chooses query or raw mode;
-4. returns cleanup that unsubscribes, aborts requests, closes EventSource
+3. calls `start(savedSpec)`, which reads the source session and chooses query or raw mode;
+4. saves applied preferences on unmount, then unsubscribes, aborts requests, closes EventSource
    connections, releases server queries, and clears the page cache.
 
 The controller is created before mount, but network and browser-lifecycle work
 starts only in `onMount`. This keeps resource ownership aligned with the Svelte
-component lifetime.
+component lifetime. Source switching leaves capture running and recreates only
+the viewer query. Saved preferences exclude row caches and snapshot tokens.
+See [source switching and notifications](command-sources.md#viewer-switching-and-notifications).
 
 `viewer` and `controller` are passed to either `VirtualLogTable` or
 `RawOutput` as typed `$props`. Components do not call `fetch` or construct
@@ -116,8 +121,8 @@ component lifetime.
 
 ## Input-mode rendering
 
-`App.svelte` renders Connecting before session recovery, Waiting for stdin while
-classification is pending, the virtual table for `records`, and a scrollable
+`SourceViewer.svelte` renders Connecting before session recovery, a source-specific
+waiting/completion message while classification is pending, the virtual table for `records`, and a scrollable
 preformatted panel for `raw`. Raw pages load four chunks at a time and are
 accepted only at the current generation and sequential offset.
 
@@ -292,7 +297,7 @@ snapshot match count remains unchanged.
 
 ```mermaid
 sequenceDiagram
-  participant App as App.svelte
+  participant App as SourceViewer.svelte
   participant VC as ViewerController
   participant API as HTTPQueryAPI
   participant Go as Go binary
@@ -300,7 +305,7 @@ sequenceDiagram
   participant TV as TanStack Virtual
 
   App->>VC: subscribe()
-  App->>VC: setQuery("", "input")
+  App->>VC: start(savedSpec)
   VC->>API: POST /api/v1/queries
   API->>Go: create query
   Go-->>API: building or ready QueryState

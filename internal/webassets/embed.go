@@ -21,3 +21,6 @@ func Handler() http.Handler {
 	}
 	return http.FileServer(http.FS(assets))
 }
+
+// TrustedOrigins is empty in release builds; requests must be same-origin.
+func TrustedOrigins() []string { return nil }

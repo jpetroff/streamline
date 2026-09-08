@@ -1,6 +1,7 @@
 # Parser engine
 
-Status: implemented, tested, and connected to progressive runtime stdin ingestion.
+Status: shared by stdin and command capture. Auto detection is the default;
+`Options.Text` emits sanitized text records immediately. See [command sources](command-sources.md).
 
 ## Flow
 
@@ -14,7 +15,9 @@ with exclusive `RawStart` and `RawEnd` offsets.
 flowchart LR
   input[/"streaming io.Reader"/] --> frame["Frame on LF, CRLF, or CR"]
   frame --> clean["Remove terminal controls"]
-  clean --> detect{"Recognizable log?"}
+  clean --> mode{"Options.Text?"}
+  mode -->|"yes"| text["Emit nonempty text records"]
+  mode -->|"no"| detect{"Recognizable log?"}
   detect -->|"JSON object or timestamped text"| parsed["Parsed stream"]
   detect -->|"Not yet"| buffer["Buffer preamble"]
   buffer --> detect
@@ -22,10 +25,15 @@ flowchart LR
   detect -->|"EOF with no match"| raw["Display-safe raw text"]
 ```
 
-Classification is stream-wide and irreversible. A valid journald/generic JSON
+In Auto mode, classification is stream-wide and irreversible. A valid journald/generic JSON
 object or timestamped text selects parsed mode; preceding and later visible lines
 remain ordinary text records. If no record recognizes the stream before EOF or
 a read error, the complete source becomes sanitized raw text instead.
+
+Text mode preserves each sanitized line as `message` with `sourceFormat: text`;
+structured fields and normalized timestamps/severity are absent. Final partial
+lines are flushed at completion. Command runners use `ingest.Capture` to defer
+EOF/error publication until the process exit result is known.
 
 ## Normalized record
 
@@ -86,8 +94,8 @@ Common diagnostic codes are
 
 ## Boundaries and verification
 
-- `cmd/streamline` starts `internal/ingest` in the background. It coalesces
-  parsed entries into batches of 512 records or 100 ms before append.
+- `cmd/streamline` starts `source.Manager`; each input uses `ingest.Capture`.
+  Parsed entries commit in batches of 512 records or 100 ms before append.
 - Pretty/multiline JSON, journal export format, stack-trace grouping, and nested
   message parsing are out of scope.
 - [engine_test.go](../internal/parse/engine_test.go) covers the committed fixture,

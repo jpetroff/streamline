@@ -36,7 +36,7 @@ export class ViewerController {
   }
 
   /** Reads session input state and starts either the parsed query or raw-output path. */
-  async start() {
+  async start(spec: QuerySpec = { filter: [], sort: 'input' }) {
     const intent = ++this.intent;
     this.abort?.abort();
     this.abort = new AbortController();
@@ -47,7 +47,7 @@ export class ViewerController {
       if (session.inputKind === 'raw') {
         await this.activateRaw(session);
       } else {
-        await this.setQuery([]);
+        await this.setQuery(spec.filter, spec.sort, spec.search);
       }
     } catch (error) {
       if (this.current(intent) && !isAbort(error)) this.dispatch({ type: 'failed', error: errorBody(error) });

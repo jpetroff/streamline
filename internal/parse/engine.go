@@ -12,6 +12,8 @@ import (
 
 // Options supplies context for timestamps that omit a timezone or year.
 type Options struct {
+	// Text emits sanitized lines immediately without structured-log detection.
+	Text            bool
 	DefaultLocation *time.Location
 	ReferenceTime   time.Time
 }
@@ -96,7 +98,7 @@ func (e *Engine) Stream(reader io.Reader, emit func([]CapturedRecord)) (*LoadRes
 	frameStart := 0
 	scanPosition := 0
 	emitted := 0
-	recognized := false
+	recognized := e.options.Text
 	buffer := make([]byte, 32<<10)
 
 	processFrame := func(source frame) {
@@ -128,6 +130,9 @@ func (e *Engine) Stream(reader io.Reader, emit func([]CapturedRecord)) (*LoadRes
 		}
 
 		entry, identifiesLogs := parseRecord(cleaned.text, context, diagnostics)
+		if e.options.Text {
+			entry = logmodel.Record{Message: cleaned.text, SourceFormat: logmodel.FormatText, Diagnostics: diagnostics}
+		}
 		records = append(records, CapturedRecord{
 			Entry:    entry,
 			RawStart: source.start,

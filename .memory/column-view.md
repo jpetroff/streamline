@@ -7,14 +7,14 @@ The parser, query protocol, and normalized row model are unchanged.
 ## Implementation
 
 The left sidebar owns a session-only draft of newline-separated JSON paths.
-App.svelte owns the applied string array, initialized to timestamp, level, and
-msg. Editing does not affect the table until Apply sends a non-empty, trimmed
+`SourceViewer.svelte` owns applied column configurations. Stdin defaults to
+`timestamp`, `level`, `msg`; commands use `timestamp`, `severity`, `message`.
+`App.svelte` retains these configurations between source switches. Editing does not affect the table until Apply sends a non-empty, trimmed
 list to the app; blank lines are ignored while order and duplicates are retained.
 
 VirtualLogTable receives the applied paths as a presentation prop. For each
-loaded row, resolveColumnValue walks case-sensitive, dot-separated own
-properties under LogRow.fields. It deliberately does not read normalized
-timestamp, severity, or message properties. A terminal object or array is
+loaded row, `resolveRowColumnValue` reads normalized timestamp/severity/message
+when available, then resolves case-sensitive dotted paths under `LogRow.fields`. A terminal object or array is
 compact-serialized as JSON, scalars become text, explicit null becomes null,
 and an absent or invalid path becomes a muted em dash.
 
@@ -31,7 +31,7 @@ without structured fields show explicit fallback states.
 
 | Part | Responsibility |
 | --- | --- |
-| [App.svelte](../web/src/App.svelte) | Own applied session state and connect sidebar to table |
+| [SourceViewer.svelte](../web/src/lib/components/SourceViewer.svelte) | Own applied source state and connect sidebar to table |
 | [ColumnSidebar.svelte](../web/src/lib/components/ColumnSidebar.svelte) | Draft editor, line-number gutter, Apply validation, stable sample |
 | [columns.ts](../web/src/lib/columns.ts) | Defaults, parsing, path resolution, value formatting, sample selection |
 | [VirtualLogTable.svelte](../web/src/lib/components/VirtualLogTable.svelte) | Dynamic headers/cells, absent markers, shared horizontal layout |

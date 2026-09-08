@@ -366,3 +366,33 @@ func TestSuppliedReferenceDatasetsWhenAvailable(t *testing.T) {
 		}
 	}
 }
+
+func TestTextModePublishesSanitizedLinesWithoutDetection(t *testing.T) {
+	reader, writer := io.Pipe()
+	records := make(chan []CapturedRecord, 4)
+	done := make(chan error, 1)
+	go func() {
+		_, err := NewEngine(Options{Text: true}).Stream(reader, func(batch []CapturedRecord) { records <- batch })
+		done <- err
+	}()
+	if _, err := io.WriteString(writer, "\x1b[31mplain\x1b[0m\n\n{\"message\":\"json stays text\"}\n"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case batch := <-records:
+		if len(batch) != 2 || batch[0].Entry.Message != "plain" || batch[1].Entry.SourceFormat != logmodel.FormatText || batch[1].Entry.Message != `{"message":"json stays text"}` {
+			t.Fatalf("batch = %#v", batch)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("text was buffered until EOF")
+	}
+	io.WriteString(writer, "final partial")
+	writer.Close()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if batch := <-records; len(batch) != 1 || batch[0].Entry.Message != "final partial" {
+		t.Fatalf("final = %#v", batch)
+	}
+	reader.Close()
+}

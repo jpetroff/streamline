@@ -21,7 +21,7 @@ const (
 	InputError     InputStatus = "error"
 )
 
-// InputKind identifies which mutually exclusive stdin representation is available.
+// InputKind identifies which mutually exclusive input representation is available.
 type InputKind string
 
 const (
@@ -66,7 +66,7 @@ var (
 	ErrNotFound          = &APIError{Code: "query_not_found", Message: "query does not exist or has expired"}
 	ErrSnapshotGone      = &APIError{Code: "snapshot_invalid", Message: "snapshot is not available"}
 	ErrInvalidRequest    = &APIError{Code: "invalid_request", Message: "request is invalid"}
-	ErrRawUnavailable    = &APIError{Code: "raw_unavailable", Message: "raw stdin output is not available"}
+	ErrRawUnavailable    = &APIError{Code: "raw_unavailable", Message: "raw output is not available"}
 	ErrGenerationChanged = &APIError{Code: "generation_changed", Message: "the requested input generation is no longer current"}
 )
 
@@ -112,7 +112,7 @@ type Page struct {
 	Rows     []Row    `json:"rows"`
 }
 
-// RawChunkPage is a bounded, immutable window over display-safe raw stdin text.
+// RawChunkPage is a bounded, immutable window over display-safe raw input text.
 type RawChunkPage struct {
 	GenerationID string   `json:"generationId"`
 	Offset       string   `json:"offset"`

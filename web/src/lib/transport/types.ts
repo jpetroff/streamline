@@ -2,7 +2,7 @@
 export type Decimal = string;
 /** Current state of the binary's input producer. */
 export type InputStatus = 'streaming' | 'eof' | 'error';
-/** Mutually exclusive stdin representation currently exposed by the binary. */
+/** Mutually exclusive input representation currently exposed by the binary. */
 export type InputKind = 'pending' | 'records' | 'raw';
 /** Lifecycle state of an immutable server-side query. */
 export type QueryStatus = 'building' | 'ready' | 'failed';
@@ -47,7 +47,7 @@ export interface APIErrorBody {
   filterErrors?: FilterError[];
 }
 
-/** Identity and input state for one in-memory binary session. */
+/** Identity and input state for one in-memory source session. */
 export interface Session {
   sessionId: string;
   generationId: string;
@@ -95,7 +95,7 @@ export interface RowPage {
   rows: LogRow[];
 }
 
-/** Bounded immutable page of display-safe raw stdin text chunks. */
+/** Bounded immutable page of display-safe raw input text chunks. */
 export interface RawChunkPage {
   generationId: string;
   offset: Decimal;
@@ -120,3 +120,19 @@ export interface FilterError {
   property: string;
   message: string;
 }
+
+/** One independently retained stdin or command capture. */
+export interface LogSource {
+  id: string;
+  kind: 'stdin' | 'command';
+  command?: string;
+  mode: 'auto' | 'text';
+  state: 'starting' | 'running' | 'stopping' | 'exited' | 'failed' | 'stopped';
+  createdAt: string;
+  finishedAt?: string;
+  exitCode?: number;
+  error?: APIErrorBody;
+  session: Session;
+}
+
+export interface CommandRequest { command: string; mode: 'auto' | 'text'; }

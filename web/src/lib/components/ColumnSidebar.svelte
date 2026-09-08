@@ -9,11 +9,13 @@
 
   let {
     viewer,
+    initialFilter,
     appliedColumns,
     onApply,
     onApplyFilters,
   }: {
     viewer: ViewerState;
+    initialFilter?: FilterSpec[];
     appliedColumns: readonly string[];
     onApply: (columns: string[]) => void;
     onApplyFilters: (filters: FilterSpec[]) => Promise<APIErrorBody | undefined>;
@@ -110,7 +112,7 @@
     </div>
   </div>
 
-  <FilterEditor applied={viewer.displayed?.filter} pending={viewer.pending !== undefined} disabled={viewer.session?.inputKind !== 'records'} onApply={onApplyFilters}>
+  <FilterEditor applied={viewer.displayed?.filter ?? initialFilter} pending={viewer.pending !== undefined} disabled={viewer.session?.inputKind !== 'records'} onApply={onApplyFilters}>
     {#snippet helper()}<SampleLogPopover fields={sampleFields} {viewer} context="filters" />{/snippet}
   </FilterEditor>
 </section>

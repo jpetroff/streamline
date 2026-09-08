@@ -26,6 +26,11 @@ logs appear progressively; otherwise EOF switches to a raw text view. The health
 endpoint is [localhost:5173/api/v1/health](http://localhost:5173/api/v1/health).
 Press Ctrl+C to stop both processes.
 
+In Coder, share port 5173 and open its HTTPS URL. Development also trusts
+`https://*.coder.intranet` origins, including dynamically assigned shared-port
+subdomains. Restart `make dev` after changing the trusted origins in
+`internal/webassets/dev.go`.
+
 ```sh
 make check
 make build
@@ -45,7 +50,7 @@ from `bun.lock`. Bun runs the frontend tooling. The built binary runs on its own
 - [Frontend visual output and virtualization](.memory/frontend.md)
 - [Development, commands, and debugging](.memory/development.md)
 
-The frontend shell, stdin ingestion, parser, parsed/raw transport, in-memory
+The frontend shell, stdin and command ingestion, parser, parsed/raw transport, in-memory
 query service, health endpoint, and build tooling are implemented.
 
 
@@ -132,3 +137,54 @@ listener routes each recognized event once, before input bubbling handlers.
 Unrecognized combinations are untouched; composition and AltGraph are ignored.
 Use `registerOverlay` for modal or popover ownership, `keyboard.execute(id)` for
 programmatic commands, and `keyboard.label` / `keyboard.aria` for platform hints.
+
+## Command log sources
+
+On Linux and macOS, select **command**, enter a shell command, choose an output
+mode, and click **Run**. Each run opens an independent log tab alongside stdin.
+Commands keep running when you switch tabs or disconnect the browser. Finished
+and stopped output stays available until **Close and discard** or binary shutdown.
+**Run again** starts a new tab and preserves the earlier run.
+
+**Auto** uses the same log detection as stdin: JSON and timestamped logs stream
+progressively, while unrecognized plain output appears when the command finishes
+or is stopped. **Text** displays each sanitized, nonempty line immediately,
+without interpreting JSON or timestamps. Command tabs default to normalized
+`timestamp`, `severity`, and `message` columns. Switching tabs retains applied
+search, filters, columns, follow preference, and the selected result position.
+
+Commands run through `/bin/sh -c` with the binary's working directory and
+environment. Quotes, pipelines, redirects, and environment expansion work as in
+a POSIX shell. stdout and stderr share one captured pipe; child stdin is the null
+device. Interactive aliases, terminal input, password prompts, and local PTYs are
+not supported. Process output buffering still depends on the command itself.
+
+For example, enter either of these commands in the UI:
+
+```sh
+ssh -o BatchMode=yes host 'journalctl -f -o json --no-pager'
+ssh -tt -o BatchMode=yes host 'journalctl -f -o json --no-pager'
+```
+
+Use preconfigured keys or an SSH agent and an already trusted host key. The second
+example forces a **remote** PTY when required, even without a local terminal.
+Streamline executes exactly what you enter; it does not add SSH options.
+
+**Stop** sends SIGTERM to the local process group and escalates to SIGKILL after
+two seconds. Captured output is flushed before the final status is shown.
+Nonzero exits expose the exit code and retain their output. Cleanup also runs
+when a command source is removed or Streamline shuts down. This does not promise
+termination of deliberately detached processes or remote jobs.
+
+All sources are in memory. Browser reload discovers existing runs without
+restarting them; restarting the binary discards them. There are no command CLI
+flags, automatic restarts, saved commands, or Windows command support.
+
+The source API is documented in [.memory/transport.md](.memory/transport.md).
+Run `make build` before the command browser tests:
+
+```sh
+bun run --bun --filter @streamline/web test:e2e commands.spec.ts
+```
+
+These tests launch their own standalone binaries.

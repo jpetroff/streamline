@@ -223,7 +223,7 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	apiErr := query.AsAPIError(err)
 	status := http.StatusBadRequest
 	switch apiErr.Code {
-	case query.ErrNotFound.Code:
+	case query.ErrNotFound.Code, "source_not_found":
 		status = http.StatusNotFound
 	case query.ErrRawUnavailable.Code, query.ErrGenerationChanged.Code:
 		status = http.StatusConflict

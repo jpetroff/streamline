@@ -19,6 +19,7 @@ const (
 
 type MemoryService struct {
 	mu        sync.Mutex
+	closed    bool
 	session   Session
 	compiler  Compiler
 	records   []Record
@@ -126,6 +127,10 @@ func (s *MemoryService) Create(_ context.Context, request CreateRequest) (State,
 	predicate = allPredicates(predicate, search)
 
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return State{}, ErrNotFound
+	}
 	s.pruneLocked()
 	id := randomID()
 	boundary := len(s.records)
@@ -314,6 +319,9 @@ func (s *MemoryService) SetInputStatus(status InputStatus, inputErr *APIError) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.session.InputStatus, s.session.Error = status, inputErr
+	if s.session.InputKind == InputPending && status == InputEOF {
+		s.session.InputKind = InputRecords
+	}
 	for _, q := range s.queries {
 		s.pushLocked(q, "input")
 	}
@@ -451,4 +459,25 @@ func splitRawChunks(output string) []string {
 		start = end
 	}
 	return chunks
+}
+
+// Close releases all query indexes, timers, subscribers, and retained source data.
+// Call after the source producer has finished.
+func (s *MemoryService) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	for id, q := range s.queries {
+		q.canceled = true
+		if q.notifyTimer != nil {
+			q.notifyTimer.Stop()
+		}
+		for sub := range q.subscribers {
+			close(sub.events)
+			delete(q.subscribers, sub)
+		}
+		delete(s.queries, id)
+	}
+	s.records = nil
+	s.rawChunks = nil
 }

@@ -19,18 +19,17 @@ The implementation adds:
 - shared JSON fixtures plus Go and frontend tests for the wire contract and
   concurrency-sensitive behavior.
 
-The binary starts progressive stdin ingestion alongside the HTTP server.
+The binary starts stdin ingestion alongside the HTTP server; the source manager
+adds independent command captures on demand.
 Recognized logs are appended in committed batches; unrecognized terminal input
-is published as display-safe raw chunks at EOF or read failure. The production
-permanent-filter compiler still accepts only an empty filter; general search
-is available independently, with input ordering. Normalization ownership
+is published as display-safe raw chunks at EOF or read failure. Field filters and general search execute server-side in input order. Normalization ownership
 is documented in [Parser engine](parser.md).
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  Stdin["stdin"] --> Parser["Streaming parser"]
+  Stdin["stdin / command pipe"] --> Parser["Parser per source"]
   Parser -->|"recognized batches"| Query["Go query service"]
   Parser -->|"terminal raw chunks"| API["Go HTTP API"]
   Engine["Future expression compiler"] --> Query
@@ -51,7 +50,7 @@ service when it builds the HTTP handler.
 
 The frontend separates concerns into wire types, an HTTP/SSE client, a bounded
 LRU page cache, a pure state reducer, and `ViewerController`. `App.svelte` owns
-one controller for its lifecycle. The virtual table renders only visible rows
+source selection; its keyed `SourceViewer.svelte` owns the active controller. The virtual table renders only visible rows
 and asks the controller for aligned pages around its overscanned viewport. See
 [Frontend visual output](frontend.md) for the Svelte and pixel-level path.
 
@@ -172,7 +171,7 @@ See [General log search](search.md) for architecture, execution flow, and design
 `filter` and `sort`:
 
 ```json
-{"filter":"","sort":"input","search":{"text":"timeout\napi","mode":"plain","operator":"and"}}
+{"filter":[],"sort":"input","search":{"text":"timeout\napi","mode":"plain","operator":"and"}}
 ```
 
 `mode` is `plain` (default) or `regexp`; `operator` is `or` (default) or `and`.
@@ -192,3 +191,45 @@ Frontend query specifications retain search alongside filter and sort through
 pending/displayed state, generation changes, reconnects, and expiration recovery.
 Row, snapshot, and SSE shapes are unchanged; matched counts and pages already
 reflect search, rather than filtering a fetched page in the browser.
+
+## Independent command sources
+
+Execution, cleanup, decisions, and debugging: [Command log sources](command-sources.md).
+
+`internal/source` owns a registry with permanent `stdin` and independently retained
+command captures. Each source owns a `MemoryService` with its own session/query
+identities. Command IDs are unique across binary restarts. Existing unscoped
+routes remain stdin aliases; the same session, raw, and query routes are available
+beneath `/api/v1/sources/{id}`. Snapshot tokens and query IDs cannot be used in
+another source's routes.
+
+| Route (under `/api/v1`) | Contract |
+| --- | --- |
+| `GET /sources` | Ordered array of source descriptors, stdin first |
+| `GET /sources/events` | Named `sources` SSE events containing the authoritative descriptor array; initial state on every connection, one-slot change queue, 15-second heartbeats |
+| `POST /sources` | `{ "command": "...", "mode": "auto" }`; mode defaults to `auto`, also accepts `text`; returns `202` with a new source |
+| `POST /sources/{id}/stop` | Idempotent Stop request; returns `204` before cleanup finishes |
+| `DELETE /sources/{id}` | Stop and join the producer, then release source data and queries; returns `204` |
+
+Descriptors expose `id`, `kind`, `command` (commands only), `mode`, `state`,
+`createdAt`, optional `finishedAt`, `exitCode`, `error`, and the existing `session`
+shape. Lifecycle is `starting → running → exited/failed`, or
+`starting/running → stopping → stopped`. Exit code `-1` represents a signaled
+process; startup failure has no exit code. `stopped` is intentional completion
+and has input status `eof`. Failed commands retain output and report input status
+`error`. Source lifecycle and query input state are finalized after output drains.
+
+Source mutations require `Content-Type: application/json` and
+`X-Streamline-Request: 1`. Stop/Delete accept an empty body or `{}`. Blank commands,
+NUL bytes, unknown modes/fields, oversized requests, and mutations of stdin are
+rejected. Unknown source IDs return `source_not_found` (404). All requests require
+a loopback Host, and mutations require same-origin browser requests. Release
+builds trust no additional origins; dev builds allow the explicit Vite origins.
+No CORS permission is granted to unrelated websites.
+
+The UI uses one source-list SSE connection and one active viewer controller
+(which can briefly overlap query streams while applying filters). Switching
+sources disposes query resources and retains only viewer preferences; returning
+creates a fresh query and restores the selected result position. Log ingestion
+is independent of all HTTP connections. Raw output uses the existing bounded
+chunk API; SSE never carries log rows.

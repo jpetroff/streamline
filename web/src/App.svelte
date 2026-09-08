@@ -1,69 +1,77 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
-  import { provideKeyboard, registerCommand } from '$lib/keyboard-context';
-  import type { ActiveRow, RowNavigator } from '$lib/row-navigation';
-  import { configureColumns, DEFAULT_COLUMNS, type DateDisplayFormat } from '$lib/columns';
-  import ColumnSidebar from '$lib/components/ColumnSidebar.svelte';
-  import RawOutput from '$lib/components/RawOutput.svelte';
-  import SearchEditor from '$lib/components/SearchEditor.svelte';
-  import RowDetailPanel from '$lib/components/RowDetailPanel.svelte';
-  import TableToolbar from '$lib/components/TableToolbar.svelte';
-  import VirtualLogTable from '$lib/components/VirtualLogTable.svelte';
-  import SidePanel from '$lib/components/SidePanel.svelte';
-  import { COLUMNS_PANEL, ROW_DETAILS_PANEL } from '$lib/side-panels';
-  import { ViewerController } from '$lib/transport/viewer-controller';
-  import type { ViewerState } from '$lib/transport/viewer-state';
+  import { onMount } from 'svelte';
+  import { provideKeyboard } from '$lib/keyboard-context';
+  import SourceViewer from '$lib/components/SourceViewer.svelte';
+  import { HTTPSourceAPI, type SourcePreferences } from '$lib/transport/sources';
+  import type { LogSource } from '$lib/transport/types';
 
   const keyboard = provideKeyboard();
-  let activeRow = $state.raw<ActiveRow>();
-  let navigator = $state<RowNavigator>();
-  let previewOpen = $state(false);
-  const controller = new ViewerController();
-  let viewer = $state<ViewerState>(controller.state);
-  let source = $state('stdin');
-  let columns = $state(configureColumns(DEFAULT_COLUMNS));
-  let columnPaths = $derived(columns.map(column => column.path));
+  const api = new HTTPSourceAPI();
+  const preferences = new Map<string, SourcePreferences>();
+  let sources = $state<LogSource[]>([]);
+  let selected = $state('stdin');
+  let sourceKind = $state('stdin');
+  let command = $state('');
+  let mode = $state<'auto' | 'text'>('auto');
+  let creating = $state(false);
+  let changing = $state(false);
+  let error = $state('');
+  let connectionError = $state('');
+  let alive = false;
+  let sourceRevision = 0;
+  let intent = 0;
+  const selectedInfo = $derived(sources.find(source => source.id === selected));
+  const running = $derived(selectedInfo && ['starting', 'running', 'stopping'].includes(selectedInfo.state));
 
-  let rowLines = $state<1 | 2>(1);
-  let columnsOpen = $state(COLUMNS_PANEL.initiallyOpen);
-  let columnsPanelWidth = $state<number>();
-  let detailsPanelWidth = $state<number>();
-
-  // Own the controller for exactly the lifetime of the root Svelte component.
-  onMount(() => {
-    const unsubscribe = controller.subscribe(next => { viewer = next; });
-    void controller.start();
-    return () => {
-      unsubscribe();
-      controller.dispose();
-    };
-  });
-
-  onMount(() => keyboard.attach(window));
-  registerCommand({ id: 'columns.show', label: 'Show columns', handler: async () => { columnsOpen = true; await tick(); } });
-  registerCommand({ id: 'preview.close', label: 'Close preview', bindings: ['Escape'], allowInInput: true,
-    priority: 10, when: () => previewOpen, handler: () => {
-      const ownedFocus = document.activeElement?.closest('#row-details-panel');
-      previewOpen = false;
-      if (ownedFocus) void navigator?.focus();
-    } });
-  registerCommand({ id: 'rows.focus', label: 'Return to active row', bindings: ['Escape'], allowInInput: true,
-    when: () => !!activeRow && !previewOpen, changesFocus: true, handler: async () => { await navigator?.focus(); } });
-
-  $effect(() => {
-    const displayed = viewer.displayed;
-    if (viewer.session?.inputKind !== 'records' || !displayed) activeRow = undefined;
-    if (!displayed || activeRow?.queryId !== displayed.queryId || activeRow?.generationId !== displayed.snapshot.generationId) previewOpen = false;
-  });
-
-  function applyColumns(paths: string[]) {
-    columns = configureColumns(paths, columns);
+  function receive(next: LogSource[]) {
+    sourceRevision++;
+    sources = next;
+    connectionError = '';
+    if (selected !== 'stdin' && !sources.some(source => source.id === selected)) select('stdin');
+    for (const id of preferences.keys()) if (!sources.some(source => source.id === id)) preferences.delete(id);
   }
+  onMount(() => {
+    alive = true;
+    const abort = new AbortController();
+    const revision = sourceRevision;
+    void api.list(abort.signal).then(next => { if (alive && revision === sourceRevision) receive(next); }).catch(err => { if (alive && err.name !== 'AbortError') connectionError = err.message; });
+    const events = api.events(next => { if (alive) receive(next); }, () => { if (alive) connectionError = 'Reconnecting to log sources…'; });
+    const detachKeyboard = keyboard.attach(window);
+    return () => { alive = false; abort.abort(); events.close(); detachKeyboard(); };
+  });
 
-  function setDateFormat(index: number, dateFormat: DateDisplayFormat) {
-    columns = columns.map((column, columnIndex) => (
-      columnIndex === index ? { ...column, dateFormat } : column
-    ));
+  function select(id: string) {
+    intent++;
+    selected = id;
+    sourceKind = id === 'stdin' ? 'stdin' : 'command';
+    error = '';
+  }
+  async function run(text = command, parseMode = mode) {
+    if (creating || !text.trim()) return;
+    creating = true; error = '';
+    const requestIntent = intent;
+    try {
+      const created = await api.create({ command: text, mode: parseMode });
+      if (!alive) return;
+      // The SSE event can arrive before this HTTP response. Keep its newer state.
+      if (!sources.some(source => source.id === created.id)) sources = [...sources, created];
+      if (requestIntent === intent) select(created.id);
+    } catch (err) { if (alive) error = err instanceof Error ? err.message : String(err); }
+    finally { creating = false; }
+  }
+  async function changeSource(remove: boolean) {
+    if (selected === 'stdin' || changing) return;
+    const id = selected;
+    changing = true; error = '';
+    try {
+      if (remove) {
+        await api.remove(id);
+        sources = sources.filter(source => source.id !== id);
+        preferences.delete(id);
+        if (selected === id) select('stdin');
+      } else { await api.stop(id); }
+    } catch (err) { if (alive) error = err instanceof Error ? err.message : String(err); }
+    finally { changing = false; }
   }
 </script>
 
@@ -73,70 +81,50 @@
 </svelte:head>
 
 <div class="flex h-full min-w-0 flex-col bg-background text-foreground">
-  <header class="flex h-12 shrink-0 items-center border-b bg-shell px-3" aria-label="Application toolbar">
+  <header class="flex min-h-12 shrink-0 items-center gap-3 border-b bg-shell px-3 py-2" aria-label="Application toolbar">
     <label for="input-source" class="sr-only">Input source</label>
-    <select
-      id="input-source"
-      bind:value={source}
-      class="h-8 min-w-32 rounded-md border border-input bg-background px-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
-      aria-label="Input source"
-    >
+    <select id="input-source" bind:value={sourceKind} onchange={() => { if (sourceKind === 'stdin') select('stdin'); }} aria-label="Input source"
+      class="h-8 min-w-32 rounded-md border border-input bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-ring">
       <option value="stdin">stdin</option>
       <option value="file" disabled>file</option>
-      <option value="command" disabled>command</option>
+      <option value="command">command</option>
     </select>
+    <nav class="flex min-w-0 flex-1 gap-1 overflow-x-auto" aria-label="Log sources">
+      <button type="button" aria-pressed={selected === 'stdin'} onclick={() => select('stdin')} class="shrink-0 rounded border px-3 py-1 text-xs aria-pressed:bg-accent">stdin</button>
+      {#each sources.filter(source => source.kind === 'command') as item (item.id)}
+        <button type="button" aria-pressed={selected === item.id} onclick={() => select(item.id)} title={item.command}
+          class="flex max-w-64 shrink-0 items-center gap-2 rounded border px-3 py-1 text-xs aria-pressed:bg-accent">
+          <span class="truncate font-mono">{item.command}</span><span class="text-muted-foreground">{item.state}</span>
+        </button>
+      {/each}
+    </nav>
   </header>
-  <div class="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-    <SidePanel definition={COLUMNS_PANEL} open={columnsOpen} bind:preferredWidth={columnsPanelWidth}>
-      <ColumnSidebar {viewer} appliedColumns={columnPaths} onApply={applyColumns} onApplyFilters={filters => controller.setFilters(filters)} />
-    </SidePanel>
-    <main class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="Streamline">
-      {#if viewer.error}
-        <div class="shrink-0 border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
-          {viewer.error.message}
-        </div>
-      {/if}
-      {#if viewer.session?.error && viewer.session.error.code !== viewer.error?.code}
-        <div class="shrink-0 border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
-          {viewer.session.error.message}
-        </div>
-      {/if}
-
-      <div class="min-h-0 min-w-0 flex-1">
-        {#if !viewer.session}
-          <div class="grid h-full place-items-center px-6 text-sm text-muted-foreground" role="status">Connecting…</div>
-        {:else if viewer.session.inputKind === 'pending'}
-          <div class="grid h-full place-items-center px-6 text-sm text-muted-foreground" role="status">Waiting for stdin…</div>
-        {:else if viewer.session.inputKind === 'raw'}
-          <RawOutput {viewer} {controller} />
-        {:else}
-          <VirtualLogTable
-            {viewer}
-            {controller}
-            {columns}
-            {rowLines}
-            onDateFormatChange={setDateFormat}
-            bind:activeRow
-            bind:navigator
-            onReset={() => { previewOpen = false; }}
-            onOpenDetails={() => { previewOpen = true; }}
-          />
-        {/if}
+  {#if sourceKind === 'command'}
+    <form class="shrink-0 space-y-2 border-b bg-shell px-3 py-2" aria-label="Run command" onsubmit={event => { event.preventDefault(); void run(); }}>
+      <div class="flex items-start gap-2">
+        <label for="command-input" class="sr-only">Command</label>
+        <textarea id="command-input" bind:value={command} rows="2" placeholder="ssh -o BatchMode=yes host 'journalctl -f -o json --no-pager'" spellcheck="false"
+          class="min-w-0 flex-1 resize-y rounded border border-input bg-background p-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring"></textarea>
+        <label class="flex flex-col gap-1 text-xs">Output mode
+          <select bind:value={mode} class="h-8 rounded border border-input bg-background px-2"><option value="auto">Auto</option><option value="text">Text</option></select>
+        </label>
+        <button type="submit" disabled={creating || !command.trim()} class="mt-5 rounded bg-primary px-3 py-2 text-xs text-primary-foreground disabled:opacity-40">{creating ? 'Starting…' : 'Run'}</button>
       </div>
-      <TableToolbar bind:rowLines bind:columnsOpen showRowControls={viewer.session?.inputKind === 'records'} total={BigInt(viewer.displayed?.snapshot.matchedCount ?? 0)} {activeRow} {navigator} />
-      {#if viewer.session?.inputKind === 'records'}
-        <SearchEditor
-          applied={viewer.displayed?.search}
-          pending={viewer.pending !== undefined}
-          onApply={search => controller.setSearch(search)}
-        />
-      {/if}
-    </main>
-    <SidePanel definition={ROW_DETAILS_PANEL} open={previewOpen} bind:preferredWidth={detailsPanelWidth}>
-      {#if previewOpen}
-        <RowDetailPanel row={activeRow?.row} error={viewer.error?.message} {columns} onClose={() => { void keyboard.execute('preview.close'); }} />
-
-      {/if}
-    </SidePanel>
-  </div>
+      <p class="text-xs text-muted-foreground">{mode === 'auto' ? 'Auto detects structured logs; plain output appears when the command ends. Choose Text to view every line live.' : 'Text displays each output line immediately.'}</p>
+    </form>
+  {/if}
+  {#if selectedInfo?.kind === 'command'}
+    <div class="flex shrink-0 items-center gap-2 border-b px-3 py-2 text-xs" aria-label="Command controls">
+      <code class="min-w-0 flex-1 truncate" title={selectedInfo.command}>{selectedInfo.command}</code>
+      <span role="status">{selectedInfo.state}{selectedInfo.exitCode !== undefined && selectedInfo.exitCode >= 0 ? ` · exit ${selectedInfo.exitCode}` : ''}</span>
+      {#if running}<button type="button" disabled={changing || selectedInfo.state === 'stopping'} onclick={() => void changeSource(false)} class="rounded border px-2 py-1 disabled:opacity-40">Stop</button>{/if}
+      <button type="button" disabled={creating} onclick={() => void run(selectedInfo?.command, selectedInfo?.mode)} class="rounded border px-2 py-1 disabled:opacity-40">Run again</button>
+      <button type="button" disabled={changing} onclick={() => void changeSource(true)} class="rounded border px-2 py-1 disabled:opacity-40">Close and discard</button>
+    </div>
+  {/if}
+  {#if error || connectionError}<div role="alert" class="shrink-0 border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{error || connectionError}</div>{/if}
+  {#key selected}
+    {@const id = selected}
+    <SourceViewer sourceId={id} info={selectedInfo} preferences={preferences.get(id)} onSave={saved => { if (id === 'stdin' || sources.some(source => source.id === id)) preferences.set(id, saved); }} />
+  {/key}
 </div>

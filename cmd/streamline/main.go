@@ -15,9 +15,7 @@ import (
 	"time"
 
 	"streamline/internal/httpapi"
-	"streamline/internal/ingest"
-	"streamline/internal/parse"
-	"streamline/internal/query"
+	"streamline/internal/source"
 	"streamline/internal/webassets"
 )
 
@@ -44,11 +42,16 @@ func run(port int) error {
 	}
 	defer listener.Close()
 
-	queryService := query.NewMemoryService(nil)
-	go ingest.Run(ctx, os.Stdin, parse.NewEngine(parse.Options{}), queryService)
+	sources := source.New()
+	defer sources.Close()
+	stdin, err := source.OpenStdin()
+	if err != nil {
+		return fmt.Errorf("open stdin: %w", err)
+	}
+	sources.StartStdin(stdin)
 
 	server := &http.Server{
-		Handler:           httpapi.NewHandler(webassets.Handler(), queryService),
+		Handler:           httpapi.NewSourceHandler(webassets.Handler(), sources, webassets.TrustedOrigins()...),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
@@ -63,6 +66,7 @@ func run(port int) error {
 		}
 		return err
 	case <-ctx.Done():
+		sources.Close()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdown); err != nil {

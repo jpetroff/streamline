@@ -12,7 +12,8 @@ Paths below are relative to the repository root.
 | --- | --- |
 | `web/src/lib/keyboard.ts` | `Command`, `KeyboardOverlay`, binding matching, registry, window listener, label formatting |
 | `web/src/lib/keyboard-context.ts` | Svelte context and mount/unmount registration helpers |
-| `web/src/App.svelte` | Registry ownership, window attachment, sidebar opening, Escape commands, active row and preview visibility |
+| `web/src/App.svelte` | Registry ownership and window attachment across source switches |
+| `web/src/lib/components/SourceViewer.svelte` | Sidebar/Escape commands, active row, preview visibility; registrations follow mounted source |
 | `web/src/lib/components/VirtualLogTable.svelte` | Row commands, `navigate`, virtual scrolling, focus restoration, selection/follow coordination |
 | `web/src/lib/row-navigation.ts`, `web/src/lib/virtual-window.ts` | Navigation interfaces, bigint validation, clamping, bounded segments |
 | `web/src/lib/components/{SearchEditor,ColumnSidebar,FilterEditor,TableToolbar}.svelte` | Editor focus, scoped Apply, filter insertion, jump input |
@@ -127,7 +128,7 @@ value → remove. Add is the final form action; Tab order needs no positive inde
 `KeyboardOverlay` supplies `open`, `modal`, `contains`, and `close` callbacks.
 An open modal restricts dispatch to scopes inside it. The import dialog registers
 its own scoped `Mod+Enter`. Escape is left to the overlay library; otherwise
-`App.svelte` closes preview before returning focus to the active row. Sample
+`SourceViewer.svelte` closes preview before returning focus to the active row. Sample
 popovers register async closing that awaits `tick()` before a focus command runs.
 
 ## Row navigation and async focus
