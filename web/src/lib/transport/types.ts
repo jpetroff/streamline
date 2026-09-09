@@ -9,7 +9,7 @@ export type QueryStatus = 'building' | 'ready' | 'failed';
 /** Ordering applied by the query service; input order is the only current option. */
 export type QuerySort = 'input';
 /** Parser family that produced a normalized log record. */
-export type SourceFormat = 'journald-json' | 'json' | 'text';
+export type SourceFormat = 'journald-json' | 'json' | 'logfmt' | 'text';
 /** Recursive value domain allowed in normalized structured log fields. */
 export type JSONValue = string | number | boolean | null | JSONValue[] | { [key: string]: JSONValue };
 

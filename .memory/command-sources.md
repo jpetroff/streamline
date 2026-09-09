@@ -49,10 +49,17 @@ See [transport contracts](transport.md#independent-command-sources) for endpoint
 | Shell text passed unchanged to `/bin/sh -c` | Quotes, pipes, redirects, and expansion use POSIX shell rules; inherit binary cwd/environment. `shellPath` is a private startup-test seam. |
 | New OS session via `Setsid`; null stdin | Isolates command input from app stdin and enables group signals. PTY/input forwarding requires a separate transport and terminal lifecycle. |
 | One pipe for stdout and stderr | Preserve received bytes; stream identity and independent buffering order are unavailable. Close the parent's writer immediately after Start. |
-| Auto is the default | Existing recognition/raw fallback. Plain output is withheld until EOF/error; Text emits sanitized nonempty lines immediately as text records. |
+| Auto is the default | JSON objects, complete logfmt, or timestamped text establish parsed output. Unrecognized output is buffered until recognition or terminal raw fallback. Text bypasses recognition and emits sanitized retained frames. |
 | Capture and terminal publication are separate | Pipe EOF alone is insufficient: process exit may still fail. Flush final records/partial lines before `finish` publishes status. |
 | Browser lifetime does not own capture | Switching, reload, query expiry, and disconnect never stop a process. Run again creates another retained source. |
 | In-memory retention | Parser buffers and query data can grow. Batch/page limits do not cap total capture memory; persistence/eviction need explicit ownership rules. |
+
+Configured source mode, per-record `SourceFormat`, query `InputKind`, and terminal
+`InputStatus` are separate domains. `mode=text` maps to `Options.Text=true` for a
+new command capture; stdin always uses Auto. The parser specification defines
+[mode semantics](parser.md#configured-modes),
+[selection precedence](parser.md#parser-selection-and-extension), and
+[capture/publication ordering](parser.md#capture-publication-and-terminal-status).
 
 Text mode does not expose structured fields or normalized timestamps/severity.
 Command columns default to `timestamp`, `severity`, `message` when no explicit
@@ -87,13 +94,13 @@ sequenceDiagram
   Runner->>Group: SIGTERM
   Note over Runner,Group: 2-second grace, then SIGKILL
   Runner->>Group: SIGKILL
-  Group-->>Capture: writers close; EOF
+  Group-->>Capture: writers close, EOF
   Note over Runner,Capture: Allow 1 more second, then close reader if needed
   Capture-->>Runner: flushed Completion
   Group-->>Runner: cmd.Wait result
-  Runner->>Manager: finish; publish status; close done
+  Runner->>Manager: finish, publish status, close done
   opt Remove or Close
-    Manager->>Manager: join producer; close query service
+    Manager->>Manager: join producer, close query service
   end
 ```
 

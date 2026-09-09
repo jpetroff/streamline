@@ -1,0 +1,231 @@
+[
+  {
+    "input": "time=\"2026-01-03T18:07:22+02:00\" level=\"info\" msg=\"Loading config \\\"example.yaml\\\": path=C:\\\\logs\\\\crowdsec.log\"",
+    "fields": {
+      "time": "2026-01-03T18:07:22+02:00",
+      "level": "info",
+      "msg": "Loading config \"example.yaml\": path=C:\\logs\\crowdsec.log"
+    },
+    "timestamp": "2026-01-03T16:07:22Z",
+    "severity": "info"
+  },
+  {
+    "input": "time=\"2026-01-03T20:03:46+02:00\" level=info msg=\"flushed 1/279 alerts because they were created 168h0m0s ago or more\" module=db",
+    "fields": {
+      "time": "2026-01-03T20:03:46+02:00",
+      "level": "info",
+      "msg": "flushed 1/279 alerts because they were created 168h0m0s ago or more",
+      "module": "db"
+    },
+    "timestamp": "2026-01-03T18:03:46Z",
+    "severity": "info"
+  },
+  {
+    "input": "time=\"2026-01-05T00:04:36+02:00\" level=info msg=\"Shutting down Appsec server\" module=acquisition.appsec name=defaultAppsec type=appsec",
+    "fields": {
+      "time": "2026-01-05T00:04:36+02:00",
+      "level": "info",
+      "msg": "Shutting down Appsec server",
+      "module": "acquisition.appsec",
+      "name": "defaultAppsec",
+      "type": "appsec"
+    },
+    "timestamp": "2026-01-04T22:04:36Z",
+    "severity": "info"
+  },
+  {
+    "input": "time=\"2026-01-05T00:04:36+02:00\" level=info msg=\"File datasource stopping\" module=acquisition.file tail=/var/log/suricata/eve.json type=file",
+    "fields": {
+      "time": "2026-01-05T00:04:36+02:00",
+      "level": "info",
+      "msg": "File datasource stopping",
+      "module": "acquisition.file",
+      "tail": "/var/log/suricata/eve.json",
+      "type": "file"
+    },
+    "timestamp": "2026-01-04T22:04:36Z",
+    "severity": "info"
+  },
+  {
+    "input": "time=\"2026-01-05T00:04:36+02:00\" level=info msg=\"Datasource stopping\" module=acquisition.journalctl src=\"journalctl---file=/var/log/journal/remote/remote-192.168.88.160.journal.--unit=jellyfin\" type=journalctl",
+    "fields": {
+      "time": "2026-01-05T00:04:36+02:00",
+      "level": "info",
+      "msg": "Datasource stopping",
+      "module": "acquisition.journalctl",
+      "src": "journalctl---file=/var/log/journal/remote/remote-192.168.88.160.journal.--unit=jellyfin",
+      "type": "journalctl"
+    },
+    "timestamp": "2026-01-04T22:04:36Z",
+    "severity": "info"
+  },
+  {
+    "input": "time=\"2026-01-05T00:04:36+02:00\" level=info msg=\"Appsec Runner is dying\" module=acquisition.appsec name=defaultAppsec runner_uuid=e96ac816-8b23-4271-8ca2-00735553c846 type=appsec",
+    "fields": {
+      "time": "2026-01-05T00:04:36+02:00",
+      "level": "info",
+      "msg": "Appsec Runner is dying",
+      "module": "acquisition.appsec",
+      "name": "defaultAppsec",
+      "runner_uuid": "e96ac816-8b23-4271-8ca2-00735553c846",
+      "type": "appsec"
+    },
+    "timestamp": "2026-01-04T22:04:36Z",
+    "severity": "info"
+  },
+  {
+    "input": "time=\"2026-01-05T00:04:39+02:00\" level=info msg=\"Shutting down PAPI\" interval=10 module=papi source=papi",
+    "fields": {
+      "time": "2026-01-05T00:04:39+02:00",
+      "level": "info",
+      "msg": "Shutting down PAPI",
+      "interval": "10",
+      "module": "papi",
+      "source": "papi"
+    },
+    "timestamp": "2026-01-04T22:04:39Z",
+    "severity": "info"
+  },
+  {
+    "input": "time=\"2026-01-05T00:04:39+02:00\" level=info msg=\"Loaded 1 parser nodes\" file=/etc/crowdsec/parsers/s00-raw/docker-logs.yaml stage=s00-raw",
+    "fields": {
+      "time": "2026-01-05T00:04:39+02:00",
+      "level": "info",
+      "msg": "Loaded 1 parser nodes",
+      "file": "/etc/crowdsec/parsers/s00-raw/docker-logs.yaml",
+      "stage": "s00-raw"
+    },
+    "timestamp": "2026-01-04T22:04:39Z",
+    "severity": "info"
+  },
+  {
+    "input": "time=\"2026-01-05T00:04:40+02:00\" level=info msg=\"Adding leaky bucket\" cfg=sparkling-star name=crowdsecurity/http-backdoors-attempts",
+    "fields": {
+      "time": "2026-01-05T00:04:40+02:00",
+      "level": "info",
+      "msg": "Adding leaky bucket",
+      "cfg": "sparkling-star",
+      "name": "crowdsecurity/http-backdoors-attempts"
+    },
+    "timestamp": "2026-01-04T22:04:40Z",
+    "severity": "info"
+  },
+  {
+    "input": "time=\"2026-01-05T00:04:40+02:00\" level=info msg=\"loading /etc/crowdsec/appsec-configs/appsec-default.yaml\" component=appsec_config module=acquisition.appsec name=defaultAppsec type=appsec",
+    "fields": {
+      "time": "2026-01-05T00:04:40+02:00",
+      "level": "info",
+      "msg": "loading /etc/crowdsec/appsec-configs/appsec-default.yaml",
+      "component": "appsec_config",
+      "module": "acquisition.appsec",
+      "name": "defaultAppsec",
+      "type": "appsec"
+    },
+    "timestamp": "2026-01-04T22:04:40Z",
+    "severity": "info"
+  },
+  {
+    "input": "time=\"2026-01-05T00:04:40+02:00\" level=info msg=\"Configuring datasource\" module=acquisition.file type=file",
+    "fields": {
+      "time": "2026-01-05T00:04:40+02:00",
+      "level": "info",
+      "msg": "Configuring datasource",
+      "module": "acquisition.file",
+      "type": "file"
+    },
+    "timestamp": "2026-01-04T22:04:40Z",
+    "severity": "info"
+  },
+  {
+    "input": "time=\"2026-01-05T00:04:40+02:00\" level=info msg=\"Starting tail (offset: 0, whence: 2)\" file=/var/log/suricata/eve.json module=acquisition.file type=file",
+    "fields": {
+      "time": "2026-01-05T00:04:40+02:00",
+      "level": "info",
+      "msg": "Starting tail (offset: 0, whence: 2)",
+      "file": "/var/log/suricata/eve.json",
+      "module": "acquisition.file",
+      "type": "file"
+    },
+    "timestamp": "2026-01-04T22:04:40Z",
+    "severity": "info"
+  },
+  {
+    "input": "time=\"2026-01-05T00:04:40+02:00\" level=info msg=\"Spawning process\" command=\"journalctl --follow -n 0 --file=/var/log/journal/remote/remote-192.168.88.200.journal '--unit=docker*' CONTAINER_NAME=immich_server\" module=acquisition.journalctl src=\"journalctl---file=/var/log/journal/remote/remote-192.168.88.200.journal.--unit=docker*.CONTAINER_NAME=immich_server\" type=journalctl",
+    "fields": {
+      "time": "2026-01-05T00:04:40+02:00",
+      "level": "info",
+      "msg": "Spawning process",
+      "command": "journalctl --follow -n 0 --file=/var/log/journal/remote/remote-192.168.88.200.journal '--unit=docker*' CONTAINER_NAME=immich_server",
+      "module": "acquisition.journalctl",
+      "src": "journalctl---file=/var/log/journal/remote/remote-192.168.88.200.journal.--unit=docker*.CONTAINER_NAME=immich_server",
+      "type": "journalctl"
+    },
+    "timestamp": "2026-01-04T22:04:40Z",
+    "severity": "info"
+  },
+  {
+    "input": "time=\"2026-01-21T00:01:46+02:00\" level=warning msg=\"grok 'IPv4_WORKAROUND' already registred\" id=weathered-wave module=parser name=crowdsecurity/sshd-success-logs stage=s01-parse",
+    "fields": {
+      "time": "2026-01-21T00:01:46+02:00",
+      "level": "warning",
+      "msg": "grok 'IPv4_WORKAROUND' already registred",
+      "id": "weathered-wave",
+      "module": "parser",
+      "name": "crowdsecurity/sshd-success-logs",
+      "stage": "s01-parse"
+    },
+    "timestamp": "2026-01-20T22:01:46Z",
+    "severity": "warn"
+  },
+  {
+    "input": "time=\"2026-01-31T19:12:54+02:00\" level=info msg=\"Starting parser routine\" idx=0",
+    "fields": {
+      "time": "2026-01-31T19:12:54+02:00",
+      "level": "info",
+      "msg": "Starting parser routine",
+      "idx": "0"
+    },
+    "timestamp": "2026-01-31T17:12:54Z",
+    "severity": "info"
+  },
+  {
+    "input": "time=\"2026-02-16T20:33:45+02:00\" level=error msg=\"while fetching bouncer info: context canceled\" ip=192.168.88.153",
+    "fields": {
+      "time": "2026-02-16T20:33:45+02:00",
+      "level": "error",
+      "msg": "while fetching bouncer info: context canceled",
+      "ip": "192.168.88.153"
+    },
+    "timestamp": "2026-02-16T18:33:45Z",
+    "severity": "error"
+  },
+  {
+    "input": "time=\"2026-02-16T20:34:09+02:00\" level=error msg=\"Failed to update base metrics: unable to update base bouncer metrics in database: context canceled\" func=UsageMetrics",
+    "fields": {
+      "time": "2026-02-16T20:34:09+02:00",
+      "level": "error",
+      "msg": "Failed to update base metrics: unable to update base bouncer metrics in database: context canceled",
+      "func": "UsageMetrics"
+    },
+    "timestamp": "2026-02-16T18:34:09Z",
+    "severity": "error"
+  },
+  {
+    "input": "time=\"2026-06-07T21:50:53+03:00\" level=error msg=\"Failed to process request body\" band=inband chain_rule_id=522965503 error=\"multipart: NextPart: EOF\" module=acquisition.appsec name=defaultAppsec runner_uuid=54f804d0-7cb6-416d-9682-0a6ea09aca13 tx_id=b1e898ad-93b2-414d-ae73-d4e9a89f0b2e type=appsec",
+    "fields": {
+      "time": "2026-06-07T21:50:53+03:00",
+      "level": "error",
+      "msg": "Failed to process request body",
+      "band": "inband",
+      "chain_rule_id": "522965503",
+      "error": "multipart: NextPart: EOF",
+      "module": "acquisition.appsec",
+      "name": "defaultAppsec",
+      "runner_uuid": "54f804d0-7cb6-416d-9682-0a6ea09aca13",
+      "tx_id": "b1e898ad-93b2-414d-ae73-d4e9a89f0b2e",
+      "type": "appsec"
+    },
+    "timestamp": "2026-06-07T18:50:53Z",
+    "severity": "error"
+  }
+]

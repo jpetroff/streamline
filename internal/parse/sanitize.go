@@ -59,8 +59,14 @@ func sanitizeBytes(input []byte, preserveNewlines bool) sanitizedText {
 			hadTerminal = true
 			i++
 		default:
-			output = append(output, current)
-			i++
+			// Consume valid UTF-8 runes together: continuation bytes can overlap
+			// the raw C1 control range without representing terminal commands.
+			size := 1
+			if current >= utf8.RuneSelf {
+				_, size = utf8.DecodeRune(input[i:])
+			}
+			output = append(output, input[i:i+size]...)
+			i += size
 		}
 	}
 

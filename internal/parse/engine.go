@@ -77,7 +77,7 @@ type frame struct {
 	end        int
 }
 
-// NewEngine builds an engine with built-in journald JSON, JSON, and text parsers.
+// NewEngine builds an engine with built-in journald JSON, JSON, logfmt, and text parsers.
 func NewEngine(options Options) *Engine {
 	return &Engine{options: options}
 }
@@ -129,16 +129,16 @@ func (e *Engine) Stream(reader io.Reader, emit func([]CapturedRecord)) (*LoadRes
 			addDiagnostic(&diagnostics, "terminal_truncated", "a terminal pager truncation marker indicates missing source text")
 		}
 
-		entry, identifiesLogs := parseRecord(cleaned.text, context, diagnostics)
-		if e.options.Text {
-			entry = logmodel.Record{Message: cleaned.text, SourceFormat: logmodel.FormatText, Diagnostics: diagnostics}
+		decision := parseDecision{Record: plainText(cleaned.text, diagnostics)}
+		if !e.options.Text {
+			decision = selectParser(cleaned.text, context, diagnostics)
 		}
 		records = append(records, CapturedRecord{
-			Entry:    entry,
+			Entry:    decision.Record,
 			RawStart: source.start,
 			RawEnd:   source.end,
 		})
-		if identifiesLogs {
+		if decision.IdentifiesLogs {
 			recognized = true
 		}
 	}

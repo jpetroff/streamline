@@ -1,105 +1,397 @@
-# Parser engine
+# Parser modes and decision architecture
 
-Status: shared by stdin and command capture. Auto detection is the default;
-`Options.Text` emits sanitized text records immediately. See [command sources](command-sources.md).
+This document specifies the implemented behavior of `internal/parse` and its
+integration with `internal/ingest`, `internal/source`, and `internal/query`.
+The configuration, classification, provenance, and completion domains below
+are independent; their values are not interchangeable.
 
-## Flow
+## Decision domains
 
-`parse.NewEngine(Options).Stream(io.Reader, callback)` frames input as it arrives
-and emits records after the first recognizable log. `Load` is the whole-input
-wrapper. `LoadResult` retains exact source bytes and contains exactly one of a
-parsed-record result or display-safe raw text; parsed records refer to the source
-with exclusive `RawStart` and `RawEnd` offsets.
+| Domain | Scope and owner | Values | Function |
+| --- | --- | --- | --- |
+| Configured mode | One source invocation; source manager | `auto`, `text` | Selects whether format recognition executes |
+| Parser option | One immutable `Engine`; `parse.Options.Text` | `false`, `true` | Internal representation of Auto and Text |
+| Recognition decision | One retained frame; `selectParser` | `parseDecision{Record, IdentifiesLogs}` | Produces a record and determines whether it constitutes evidence for structured stream output |
+| Stream classification | One `Engine.Stream` invocation; `recognized` | `false`, `true` | Controls callback eligibility and final result variant; transition is monotonic |
+| Record provenance | One `logmodel.Record`; `SourceFormat` | `journald-json`, `json`, `logfmt`, `text` | Identifies the normalization path |
+| Parser result variant | One completed load; `LoadResult.Kind` | `parsed`, `raw` | Selects `ParsedResult` or `RawResult` |
+| Query input kind | One source query service; `Session.InputKind` | `pending`, `records`, `raw` | Identifies the representation currently available to transport consumers |
+| Terminal input status | One source query service; `Session.InputStatus` | `streaming`, `eof`, `error` | Reports producer completion independently of representation |
 
-```mermaid
-flowchart LR
-  input[/"streaming io.Reader"/] --> frame["Frame on LF, CRLF, or CR"]
-  frame --> clean["Remove terminal controls"]
-  clean --> mode{"Options.Text?"}
-  mode -->|"yes"| text["Emit nonempty text records"]
-  mode -->|"no"| detect{"Recognizable log?"}
-  detect -->|"JSON object or timestamped text"| parsed["Parsed stream"]
-  detect -->|"Not yet"| buffer["Buffer preamble"]
-  buffer --> detect
-  parsed --> append["Emit committed record batches"]
-  detect -->|"EOF with no match"| raw["Display-safe raw text"]
-```
+`SourceFormat=text` does not imply configured Text mode or a raw result. It can
+represent forced text, recognized timestamped text, or an unrecognized frame
+retained within a parsed stream. `ResultRaw` is a terminal representation, not a
+selectable parser. Process lifecycle states such as `running`, `failed`, and
+`stopped` belong to the [source manager](command-sources.md#completion-and-cleanup).
 
-In Auto mode, classification is stream-wide and irreversible. A valid journald/generic JSON
-object or timestamped text selects parsed mode; preceding and later visible lines
-remain ordinary text records. If no record recognizes the stream before EOF or
-a read error, the complete source becomes sanitized raw text instead.
+## Configured modes
 
-Text mode preserves each sanitized line as `message` with `sourceFormat: text`;
-structured fields and normalized timestamps/severity are absent. Final partial
-lines are flushed at completion. Command runners use `ingest.Capture` to defer
-EOF/error publication until the process exit result is known.
-
-## Normalized record
-
-`logmodel.Record` is the shared parser/query shape:
-
-| Field | Current rule |
-| --- | --- |
-| `timestamp` | RFC3339Nano UTC; omitted when no supported timestamp is found |
-| `severity` | `debug`, `info`, `warn`, `error`, or `fatal` |
-| `message` | Clean display text; a recognized text timestamp prefix is removed |
-| `fields` | Complete cleaned JSON object using JSON-compatible value types |
-| `sourceFormat` | `journald-json`, `json`, or `text` |
-| `diagnostics` | Stable codes for non-fatal cleanup or fallback decisions |
-
-Journald recognition requires `__REALTIME_TIMESTAMP` plus a cursor,
-monotonic timestamp, or boot ID. It uses `MESSAGE`, maps `PRIORITY`, and
-prefers `_SOURCE_REALTIME_TIMESTAMP` over `__REALTIME_TIMESTAMP`. Generic
-JSON checks `message/msg/log`, `severity/level/lvl/priority`, and
-`timestamp/time/ts/@timestamp`. Plain text recognizes RFC3339,
-`YYYY-MM-DD HH:mm:ss`, and syslog month/day timestamps. Nested JSON or logfmt
-inside a message is intentionally not parsed again.
-
-```mermaid
-flowchart LR
-  capture["Engine.Stream / Load"] --> raw[("Exact raw bytes")]
-  capture --> entry["Normalized logmodel.Record"]
-  raw --> offsets["CapturedRecord offsets"]
-  offsets --> entry
-  entry -->|"512 records / 100 ms"| append["MemoryService.Append copy"]
-  append --> stored[("Query records")]
-  stored --> page["Page result copy"]
-  page --> wire["Frontend LogRow"]
-  raw --> rawResult["Sanitized RawResult"]
-  rawResult -->|"Bounded 64 KiB chunks after EOF/error"| browser["Raw frontend panel"]
-```
-
-## Decision ledger
-
-| Revisitable decision | Implemented in | Revisit when |
+| Property | Auto | Text |
 | --- | --- | --- |
-| Stream complete frames while retaining exact source bytes | `Engine.Stream`, `LoadResult` in [engine.go](../internal/parse/engine.go) | Input limits, disk spill, or raw replay are introduced |
-| Treat LF, CRLF, lone CR, and a final unterminated line as record boundaries | `Engine.Stream` framing in [engine.go](../internal/parse/engine.go) | Multiline records or terminal screen replay are added |
-| Strip ANSI/ECMA-48 and unsafe C0/C1 controls with a state machine | `sanitizeBytes` in [sanitize.go](../internal/parse/sanitize.go) | Styled output should be preserved or more terminal protocols are supported |
-| Drop only styled `less` filler/status lines; retain uncertain content | `isPagerArtifact`, `hasLessTruncation` in [sanitize.go](../internal/parse/sanitize.go) | Other pagers need explicit artifact rules |
-| Select parsed mode on the first JSON object or timestamped text record | `Engine.Stream`, `parseRecord` | A parser registry, confidence scoring, or more formats are added |
-| Preserve structured JSON types with `json.Number` in Go | `decodeJSON`, `cleanJSONValue` in [normalize.go](../internal/parse/normalize.go) | Exact numeric spelling must cross the browser boundary |
-| Prefer source time, fall back to journal receipt time, and map syslog priority | `normalizeJournald` in [normalize.go](../internal/parse/normalize.go) | Receipt-time ordering or all eight syslog levels are required |
-| Use configurable timezone/reference context for incomplete text timestamps | `parseLeadingTimestamp` in [timestamp.go](../internal/parse/timestamp.go) | Input-specific timezone/year controls are exposed |
-| Expose terminal unrecognized input only as display-safe bounded chunks | `RawResult`, `GET /api/v1/input/raw` | Exact-byte download or raw-record details are designed |
-| Deep-copy nested fields at query append and page boundaries | `CloneRecord` in [model.go](../internal/logmodel/model.go), `Append` and `Page` in [memory.go](../internal/query/memory.go) | Records become immutable value objects or storage ownership changes |
+| Engine construction | `Options{Text: false}`; zero-value default | `Options{Text: true}` |
+| Initial `recognized` value | `false` | `true` |
+| Format selection | `selectParser` executes for each retained frame | Selector is bypassed; `plainText` executes |
+| Record contents | Format-specific normalization or text fallback | Sanitized line in `Message`; `SourceFormat=text`; no fields, timestamp, or severity |
+| Callback eligibility | Begins after the first recognizing frame | Begins with the first retained complete frame |
+| Unrecognized prefix | Buffered records; emitted in input order after recognition | No recognition buffer delay |
+| Final result | `parsed` if any frame recognizes logs; otherwise `raw` | `parsed`, including an empty record set |
+| Diagnostics | Cleanup, recognition, and normalization diagnostics | Cleanup and truncation diagnostics only |
 
-Common diagnostic codes are
-`terminal_controls_removed`, `terminal_artifact_skipped`,
-`terminal_truncated`, `invalid_utf8_replaced`,
-`malformed_json_fallback`, `timestamp_context_assumed`,
-`invalid_timestamp`, `missing_message`, `non_text_message`,
-`invalid_severity`, and `multiple_journal_values`.
+The command source API defaults an omitted or empty mode to `auto`, validates
+`auto` or `text`, and rejects other values with `invalid_mode`. The command
+runner maps `mode == "text"` to `Options.Text`. Stdin uses `Options{}` and
+therefore Auto. There is no runtime source-mode mutation or individual-format
+override. Saved configurations persist the source mode; loading a configuration
+prepares a subsequent run without reclassifying an existing source.
 
-## Boundaries and verification
+"Callback eligibility" refers to `Engine.Stream`. It is not a synchronous UI
+publication guarantee: framing requires a complete line or terminal partial line,
+and ingestion applies an additional batching interval.
 
-- `cmd/streamline` starts `source.Manager`; each input uses `ingest.Capture`.
-  Parsed entries commit in batches of 512 records or 100 ms before append.
-- Pretty/multiline JSON, journal export format, stack-trace grouping, and nested
-  message parsing are out of scope.
-- [engine_test.go](../internal/parse/engine_test.go) covers the committed fixture,
-  mixed formats, terminal cleanup, time context, malformed input, raw spans,
-  long lines, partial reader failures, and the supplied local datasets when
-  present.
-- Query/API/frontend tests cover typed-field transport and defensive copying.
+## Execution stages and ownership
+
+```mermaid
+flowchart TD
+  Reader["io.Reader bytes"] --> Frame["Engine: retain source bytes and frame input"]
+  Frame --> Clean["sanitizeBytes: terminal controls and UTF-8"]
+  Clean --> Retain{"Retain frame?"}
+  Retain -->|"no"| Skip["Skip whitespace-only or recognized pager frame"]
+  Retain -->|"yes"| Mode{"Options.Text"}
+  Mode -->|"true"| Literal["plainText: SourceFormat=text"]
+  Mode -->|"false"| Selector["selectParser: ordered per-frame decision"]
+  Literal --> Capture["CapturedRecord: Entry and raw byte interval"]
+  Selector --> Capture
+  Capture --> Gate["Engine: update recognition state and emit eligible records"]
+  Gate --> Batch["ingest.Capture: batch normalized entries"]
+  Batch --> Query["MemoryService.Append: clone records and assign IDs"]
+  Query --> HTTP["Query snapshots and HTTP row pages"]
+```
+
+| Owner | Implementation | Contract |
+| --- | --- | --- |
+| Stream mechanics | [engine.go](../internal/parse/engine.go) | Reads bytes; retains source; frames, sanitizes, filters frames; updates recognition state; emits records; selects final result |
+| Format selection | [selector.go](../internal/parse/selector.go) | Owns ordered recognition and `parseDecision`; has no stream or process state |
+| JSON decoding | [json.go](../internal/parse/json.go) | Decodes exactly one JSON value with `json.Number`; invokes shared field normalization |
+| Journald interpretation | [journald.go](../internal/parse/journald.go) | Recognizes journal field structure and normalizes journal-specific values |
+| Logfmt decoding | [logfmt.go](../internal/parse/logfmt.go) | Scans a complete key/value line; preserves string values; invokes shared field normalization |
+| Text interpretation | [text.go](../internal/parse/text.go) | Extracts a leading timestamp or preserves the complete sanitized line |
+| Common normalization | [normalize.go](../internal/parse/normalize.go) | Cleans decoded JSON values and applies shared canonical-field aliases |
+| Shared primitives | [timestamp.go](../internal/parse/timestamp.go), [severity.go](../internal/parse/severity.go), [diagnostic.go](../internal/parse/diagnostic.go), [sanitize.go](../internal/parse/sanitize.go) | Timestamp context, severity mappings, diagnostic deduplication, terminal and UTF-8 handling |
+| Publication | [stdin.go](../internal/ingest/stdin.go) | Batches entries and separates capture completion from terminal status publication |
+
+Framing recognizes LF, CRLF, lone CR, and a final unterminated line. A CR at a
+read boundary is deferred until the next byte or terminal read establishes
+whether a following LF belongs to the same delimiter. A single read can contain
+multiple frames; a frame can span multiple reads. There is no scanner token-size
+limit. Escaped newlines decoded inside structured values do not create frames.
+
+Sanitization occurs before selection. Valid UTF-8 sequences are consumed as
+complete runes so continuation bytes are not interpreted as C1 controls.
+Decoded structured strings are sanitized again after unescaping. Whitespace-only
+frames are omitted. Recognized pager filler/status frames are omitted only when
+terminal controls were present. Exact input bytes are retained independently of
+these transformations.
+
+## Stream classification state machine
+
+For retained frame `i`, define `d_i = parseDecision.IdentifiesLogs`. The engine
+uses the recurrence `r_0 = Options.Text`, `r_i = r_(i-1) OR d_i`. Skipped frames
+do not change `r`. Once `r` becomes true, subsequent record-level failures cannot
+return the stream to raw eligibility. Text mode retains `r=true` without calling
+the selector.
+
+```mermaid
+stateDiagram-v2
+  state "Auto: recognition pending" as Pending
+  state "Records eligible for emission" as Active
+  state "LoadResult.Kind = parsed" as Parsed
+  state "LoadResult.Kind = raw" as Raw
+  [*] --> Pending: Options.Text = false
+  [*] --> Active: Options.Text = true
+  Pending --> Pending: retained frame / IdentifiesLogs = false
+  Pending --> Active: retained frame / IdentifiesLogs = true
+  Active --> Active: retained frame / any recognition result
+  Pending --> Raw: EOF or read error / no recognition
+  Active --> Parsed: EOF or read error
+  Parsed --> [*]
+  Raw --> [*]
+```
+
+The terminal transitions occur after processing the final partial frame, if any.
+While pending, the engine buffers normalized fallback records without invoking
+the callback. On recognition, the next emission includes every un-emitted
+record, including the prefix, in input order. Later fallback records remain
+eligible for emission. `emitReady` executes after processing available frames
+from each read that supplies bytes and after terminal framing. `Load(reader)` uses the
+same path with a nil callback and returns the complete result.
+
+At completion, exactly one result pointer is non-nil:
+
+| Final classification | Result invariant |
+| --- | --- |
+| `recognized=true` | `Kind=parsed`, `Parsed!=nil`, `Raw=nil` |
+| `recognized=false` | `Kind=raw`, `Raw!=nil`, `Parsed=nil` |
+
+`Source` contains all bytes read in both variants. Raw output is generated by
+sanitizing the complete source again with newline preservation. It is not a
+concatenation of retained text records: whitespace-only frames and sanitized
+pager text can consequently remain in the raw representation. Auto with empty
+input returns raw text of length zero; Text with empty input returns zero records.
+
+## Parser selection and extension
+
+The selector executes the following exclusive branches. It never fixes one
+parser for the entire source and performs no recursive parsing of message values.
+
+```mermaid
+flowchart TD
+  Input["Sanitized retained frame"] --> JSONShape{"TrimSpace prefix is an object or array delimiter?"}
+  JSONShape -->|"yes"| Decode{"Exactly one valid JSON value?"}
+  Decode -->|"no"| BadJSON["text; IdentifiesLogs=false; malformed_json_fallback"]
+  Decode -->|"yes"| Object{"Root is an object?"}
+  Object -->|"no"| BadRoot["text; IdentifiesLogs=false; unsupported_json_root"]
+  Object -->|"yes"| CleanObject["Clean decoded object"]
+  CleanObject --> Journal{"Journald identifying fields present?"}
+  Journal -->|"yes"| JournalRecord["journald-json; IdentifiesLogs=true"]
+  Journal -->|"no"| JSONRecord["json; IdentifiesLogs=true"]
+  JSONShape -->|"no"| Candidate{"First space/tab-delimited token contains equals sign?"}
+  Candidate -->|"yes"| Scan{"Complete logfmt scan succeeds?"}
+  Scan -->|"yes"| LogfmtRecord["logfmt; IdentifiesLogs=true"]
+  Scan -->|"no"| BadLogfmt["text; IdentifiesLogs=false; malformed_logfmt_fallback"]
+  Candidate -->|"no"| Timestamp{"Leading timestamp parses?"}
+  Timestamp -->|"yes"| TimedText["text; IdentifiesLogs=true; timestamp extracted"]
+  Timestamp -->|"no"| Plain["text; IdentifiesLogs=false; complete line retained"]
+```
+
+1. **JSON branch:** `strings.TrimSpace(input)` starts with `{` or `[`. Decode
+   once, require EOF after the first value, and require an object root. Failed
+   JSON candidates return immediately; they are never offered to logfmt.
+2. **Journald specialization:** the cleaned object contains
+   `__REALTIME_TIMESTAMP` and at least one of `__CURSOR`,
+   `__MONOTONIC_TIMESTAMP`, or `_BOOT_ID`. Recognition checks field presence;
+   invalid timestamp/message values do not revoke recognition. Other objects
+   use generic JSON, including objects with no known canonical fields.
+3. **Logfmt branch:** trim only leading/trailing spaces and tabs. If the first
+   space/tab-delimited token contains `=`, scan the entire line. Success
+   recognizes logs without requiring timestamp, severity, or message fields.
+   Failure returns the complete sanitized input as text and discards partial
+   fields and scan diagnostics. Timestamp recognition is not attempted afterward.
+4. **Text branch:** `normalizeText` attempts a leading timestamp after removing
+   leading spaces/tabs. Success removes the timestamp prefix from `Message` and
+   recognizes logs. Failure preserves the complete sanitized input as text.
+
+Extension requirements:
+
+1. Define the new format's recognition predicate, decoding failure semantics,
+   normalization rules, and precedence relative to existing formats.
+2. Implement format-specific behavior in a named file and add an explicit branch
+   to `selectParser`; keep read loops, offsets, and publication outside the parser.
+3. Return `parseDecision` with recognition evidence independent of normalization
+   diagnostics. Reuse common helpers only where the source semantics match.
+4. For a new provenance value, update Go `SourceFormat` and the TypeScript
+   `SourceFormat` union. Do not add a source mode unless explicit user selection
+   is required; source modes and parser formats are different contracts.
+5. Add precedence, negative-recognition, malformed-input, mixed-format, streaming,
+   raw-offset, and transport tests. Update this specification and its diagrams.
+
+## Normalized record contract
+
+| Field | Contract |
+| --- | --- |
+| `Timestamp` | RFC3339Nano in UTC; empty when normalization finds no valid timestamp |
+| `Severity` | `debug`, `info`, `warn`, `error`, `fatal`, or empty |
+| `Message` | Sanitized source string, timestamp-stripped text, or compact structured fallback |
+| `Fields` | Complete cleaned source object; JSON types are preserved with `json.Number`; logfmt values are strings |
+| `SourceFormat` | Selected normalization family; independent of configured source mode |
+| `Diagnostics` | Deduplicated by code within a record; nonfatal |
+| `MessageIsJSON` | Internal flag for serialized display fallbacks; excluded from JSON transport |
+
+Generic JSON and logfmt use `normalizeFields` with the following precedence:
+
+| Canonical value | Ordered aliases | Selection semantics |
+| --- | --- | --- |
+| Message | `message`, `msg`, `log` | First present non-null value; empty strings are valid; non-string JSON values are serialized with `non_text_message` |
+| Severity | `severity`, `level`, `lvl`, `priority` | First recognized value; invalid candidates add `invalid_severity` and allow later aliases |
+| Timestamp | `timestamp`, `time`, `ts`, `@timestamp` | First valid value; invalid candidates add `invalid_timestamp` and allow later aliases |
+
+Absent message aliases produce compact serialization of the complete field map,
+`missing_message`, and `MessageIsJSON=true`. Search then traverses original field
+values instead of matching serialized keys. Actual string messages remain
+searchable even when their content resembles JSON or logfmt.
+
+JSON numeric `priority` values support syslog priority mapping; JSON numeric `ts`
+values support Unix seconds. String timestamps use the shared timestamp parser.
+Numeric-looking logfmt strings are not converted to numeric timestamps,
+priorities, booleans, nulls, or numeric filter operands.
+
+Journald uses `MESSAGE`, maps `PRIORITY`, and tries `_SOURCE_REALTIME_TIMESTAMP`
+before `__REALTIME_TIMESTAMP`. Journal timestamps are integer microseconds since
+the Unix epoch. `MESSAGE` supports text and byte arrays; repeated journal values
+select the first usable value and can produce `multiple_journal_values`.
+An unusable or missing message produces a compact object fallback.
+
+Text timestamps support calendar timestamps with optional fractional seconds and
+timezone, plus syslog month/day/time prefixes. Missing zones use
+`Options.DefaultLocation` (UTC by default). Missing years select the closest
+valid candidate from the reference year and its adjacent years.
+`Options.ReferenceTime` defaults to the time at stream initialization. Inferred
+context produces `timestamp_context_assumed`. These options are internal engine
+configuration; the source API does not expose them.
+
+## Logfmt rules
+
+CrowdSec's `time="…" level=info msg="…"` output uses the general `logfmt` parser.
+It accepts one or more complete `key=value` pairs separated by spaces or tabs,
+without requiring a known field or timestamp. A complete `status=403` line therefore sets
+`parseDecision.IdentifiesLogs=true` in Auto mode.
+
+- Keys are nonempty and unquoted, with no space, tab, double quote, or equals sign.
+  Keys stay literal; dots do not create nested objects. Existing column/filter
+  paths still traverse objects and do not gain literal dotted-key lookup.
+- Values are empty, unquoted, or double quoted. Unquoted values may contain `=`;
+  double quotes must enclose the whole value and be followed by a separator or EOF.
+  Double-quoted values use Go string escaping via `strconv.Unquote`, compatible
+  with [Logrus text quoting](https://github.com/sirupsen/logrus/blob/master/text_formatter.go).
+  Single quotes and backticks have no quoting semantics; they are literal
+  unquoted characters. Bare keys without `=` are rejected.
+- All values remain strings, including `403`, `true`, and `null`. Numeric filters
+  continue to require numeric source fields and do not coerce these strings.
+  Numeric `ts`/`priority` JSON behavior therefore does not apply to logfmt strings.
+- Normalization shares JSON's alias order. A valid message alias may be empty;
+  absent messages use a compact object display fallback with `missing_message`
+  and `MessageIsJSON`, so general search visits values rather than object keys.
+  Invalid timestamps/severities retain source values and existing diagnostics.
+- The last duplicate key wins with `duplicate_logfmt_key`. A leading token
+  containing `=` selects a candidate; scanning must consume the entire line.
+  Malformed candidates return whole sanitized text, discard partial fields and
+  their diagnostics, and add `malformed_logfmt_fallback` with a one-based byte
+  position in the trimmed, sanitized line. They do not identify the source as logs.
+- Values are sanitized after unquoting, preserving Unicode and escaped newlines
+  while removing terminal controls. Exact source bytes and physical line framing
+  are unchanged. Embedded messages are not recursively parsed.
+
+For `time="2026-01-03T18:07:22+02:00" level=warning msg="blocked" module=db`,
+the canonical values are `timestamp=2026-01-03T16:07:22Z`, `severity=warn`, and
+`message=blocked`; `fields` retains all four original string values.
+
+## Capture, publication, and terminal status
+
+```mermaid
+sequenceDiagram
+  participant Producer as Source reader
+  participant Engine as parse.Engine
+  participant Capture as ingest.Capture
+  participant Query as MemoryService
+  participant Owner as Source owner
+  Producer->>Engine: bytes containing complete frames
+  Engine->>Engine: sanitize, select, retain, update recognized
+  opt recognized and un-emitted records exist
+    Engine->>Capture: callback with CapturedRecord batch
+    Capture->>Capture: retain Entry values in pending batch
+    Capture->>Query: Append on 512 records or 100 ms ticker
+  end
+  Producer-->>Engine: EOF or read error
+  Engine->>Engine: finalize partial frame and emit remaining eligible records
+  Engine-->>Capture: LoadResult and optional wrapped read error
+  Capture->>Query: flush pending entries
+  Capture-->>Owner: Completion containing raw text or read error
+  Note over Owner,Query: Commands also wait for process exit before terminal publication
+  Owner->>Query: Completion.Publish via SetInputStatus or SetRawOutput
+```
+
+`Engine.Stream` has no context parameter. It returns a partial result plus a
+wrapped error for a non-EOF read failure and adds `input_read_error` at
+`[len(Source), len(Source))`. Bytes returned together with a read error are
+processed before completion. `ingest.Capture` adds cancellation and batching;
+source owners must close blocking readers when interruption is required.
+
+`Capture` forwards `Entry` values, flushes batches of 512 records, and flushes a
+partial batch on its 100 ms ticker or completion. These are publication
+thresholds, not strict scheduling deadlines or memory-retention limits.
+`MemoryService.Append` clones records, assigns source-local IDs, and changes a
+pending query input kind to `records` on a nonempty append. Parser recognition
+can therefore precede the corresponding query/session transition.
+
+`Completion.Publish` selects terminal `eof` or `error` independently of whether
+the result contains records or raw text. A supplied source/process error takes
+precedence over the captured read error. `SetRawOutput` publishes terminal raw
+text as UTF-8-boundary-safe chunks of at most 64 KiB and sets `InputKind=raw`.
+For parsed output it calls `SetInputStatus`. If no records were appended, that
+method changes `pending` to `records` on `eof` only; an empty Text capture ending
+in a read error can consequently remain `InputKind=pending, InputStatus=error`.
+
+For commands, capture EOF does not determine process success. The source owner
+waits for capture and process completion before publishing final state. Intentional
+Stop and process-exit error policies are specified in
+[command-source completion](command-sources.md#completion-and-cleanup).
+HTTP row/raw endpoints transfer content; SSE transfers state notifications only.
+
+## Provenance and diagnostic boundaries
+
+| Evidence | Owner and scope | Availability |
+| --- | --- | --- |
+| Exact bytes | `LoadResult.Source` | Returned by `Engine.Load`/`Stream`; retained during that invocation |
+| Raw interval | `CapturedRecord.RawStart`, `RawEnd` | Half-open byte interval in `Source`, including the original delimiter when present |
+| Parser identity | `Record.SourceFormat` | Retained by ingestion/query and included in HTTP rows |
+| Record diagnostics | `Record.Diagnostics` | Retained for emitted records and included in HTTP rows |
+| Skipped-frame diagnostics | `LoadResult.Diagnostics` | `terminal_artifact_skipped`, with the skipped interval; not forwarded by ingestion |
+| Read failure | Returned error and `LoadDiagnostic` | Error translated into terminal input status; the full load-diagnostic list is not transported |
+
+Raw intervals are not copied into query rows. `Capture` does not retain the
+complete `LoadResult` after completion. Source replay, exact-byte retrieval, and
+an HTTP parser trace are not implemented. Raw fallback preserves display-safe
+text, not exact source bytes.
+
+When a source ends as raw, buffered fallback records are omitted from the result;
+their per-record diagnostics are not promoted to `LoadResult.Diagnostics`.
+A malformed logfmt line therefore exposes `malformed_logfmt_fallback` in a row
+only when another frame has recognized the source as parsed output. Cleanup
+codes can also occur in Text mode; parser-specific codes cannot.
+
+| Decision or transformation | Diagnostic code |
+| --- | --- |
+| Terminal controls removed from a retained line or decoded value | `terminal_controls_removed` |
+| Invalid UTF-8 replaced | `invalid_utf8_replaced` |
+| Recognized terminal-only/pager frame omitted | `terminal_artifact_skipped` |
+| Pager truncation marker detected | `terminal_truncated` |
+| JSON-shaped line cannot decode as one complete value | `malformed_json_fallback` |
+| Valid JSON root is not an object | `unsupported_json_root` |
+| Complete logfmt candidate cannot be scanned | `malformed_logfmt_fallback` |
+| Repeated logfmt key; final value retained | `duplicate_logfmt_key` |
+| JSON key cleanup merges distinct source keys | `field_key_collision` |
+| Missing message / unusable or non-string message | `missing_message`, `non_text_message` |
+| Invalid canonical timestamp or severity candidate | `invalid_timestamp`, `invalid_severity` |
+| Timestamp requires configured year or timezone context | `timestamp_context_assumed` |
+| Journal field has multiple values | `multiple_journal_values` |
+| Reader returns a non-EOF error | `input_read_error` |
+
+Logfmt diagnostic byte positions are one-based offsets in the space/tab-trimmed,
+sanitized candidate. They are not offsets into `LoadResult.Source`; terminal
+cleanup can change byte lengths. Use `CapturedRecord` intervals for exact-byte
+correlation at the parser boundary.
+
+## Architectural invariants and verification
+
+| Invariant | Primary evidence |
+| --- | --- |
+| Source mode is distinct from per-record format | [selector tests](../internal/parse/selector_test.go) |
+| Auto classification is monotonic; mixed formats preserve order | [engine tests](../internal/parse/engine_test.go), [selector tests](../internal/parse/selector_test.go) |
+| Text bypasses selection and emits sanitized records before EOF | [engine tests](../internal/parse/engine_test.go), [selector tests](../internal/parse/selector_test.go) |
+| Malformed structured candidates retain the full sanitized line | [logfmt tests](../internal/parse/logfmt_test.go), [engine tests](../internal/parse/engine_test.go) |
+| Framing and normalization preserve raw byte intervals | [logfmt tests](../internal/parse/logfmt_test.go), [engine tests](../internal/parse/engine_test.go) |
+| UTF-8 continuation bytes do not become terminal commands | [sanitizer tests](../internal/parse/sanitize_test.go) |
+| Recognition enables publication before source completion | [ingestion tests](../internal/ingest/stdin_test.go) |
+| String-valued fields and provenance survive query/HTTP transport | [logfmt HTTP tests](../internal/httpapi/logfmt_test.go) |
+| Canonical and source fields remain selectable as columns | [column tests](../web/tests/columns.test.ts) |
+
+The committed [CrowdSec fixture](../internal/parse/testdata/crowdsec.json) contains
+18 field combinations and escaped values. The optional full local dataset is
+checked against its current 136,232 records. `make check` runs frontend checks,
+frontend tests, Go tests, Go vet, and formatting validation. The pre-existing
+optional terminal-transcript failure is recorded in
+[command-source verification](command-sources.md#debugging-and-verification).
+
+Multiline JSON, stack-trace grouping, journal export records, recursive message
+parsing, per-format manual overrides, source replay, and bounded capture storage
+are outside the implemented parser contract. Additions must preserve or explicitly
+revise the decision domains and invariants above.

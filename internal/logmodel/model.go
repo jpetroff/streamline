@@ -9,6 +9,7 @@ type SourceFormat string
 const (
 	FormatJournaldJSON SourceFormat = "journald-json"
 	FormatJSON         SourceFormat = "json"
+	FormatLogfmt       SourceFormat = "logfmt"
 	FormatText         SourceFormat = "text"
 )
 

@@ -21,7 +21,7 @@ make dev
 ```
 
 Open [localhost:5173](http://localhost:5173). Development starts in “Waiting
-for stdin…” and accepts terminal input until EOF. Recognized JSON or timestamped
+for stdin…” and accepts terminal input until EOF. Recognized JSON, logfmt, or timestamped
 logs appear progressively; otherwise EOF switches to a raw text view. The health
 endpoint is [localhost:5173/api/v1/health](http://localhost:5173/api/v1/health).
 Press Ctrl+C to stop both processes.
@@ -45,6 +45,49 @@ non-log output is shown in the raw view after EOF. Use `make run PORT=8081` or
 
 Setup checks the global Go and Bun installations and installs dependencies
 from `bun.lock`. Bun runs the frontend tooling. The built binary runs on its own.
+
+### Build archive and installation
+
+`make build` also produces `bin/streamline.<GOOS>.<GOARCH>.tar.gz`, containing the
+`streamline` executable (with all web assets embedded) and `README.md`. It defaults
+to the build machine's OS and architecture. Set `GOOS` and/or `GOARCH` as Make
+arguments or environment variables to select a target, using Go's platform names:
+
+```sh
+make build                         # e.g. bin/streamline.linux.amd64.tar.gz
+make build GOARCH=arm64             # host OS, ARM64 architecture
+make build GOOS=darwin GOARCH=arm64  # bin/streamline.darwin.arm64.tar.gz (macOS)
+```
+
+Archives for different targets have distinct filenames. Each build replaces
+`bin/streamline` with the selected target's executable.
+
+Publish the archive, replace the default `TARBALL_URL` in `scripts/install.sh`
+with its URL, and host the installer. Users can then run:
+
+```sh
+curl -sS https://your-host.example/install.sh | sh
+```
+
+The tarball URL can also be overridden without editing the script:
+
+```sh
+curl -sS https://your-host.example/install.sh | STREAMLINE_TARBALL_URL=https://your-host.example/streamline.linux.amd64.tar.gz sh
+```
+
+Choose a build matching the destination system's OS and architecture. Installation
+requires `curl`, `tar` with gzip support, and standard POSIX shell utilities; no
+Go, Bun, or root access is needed. The installer places the executable and all
+supplementary archive files in `~/.local/streamline`, then links
+`~/.local/bin/streamline` to the executable. Add `~/.local/bin` to your `PATH` if
+needed. The installer displays the download URL, extraction paths, files being
+transferred, installation directories, launcher link, and temporary-file cleanup.
+Rerun the installer to update an existing installation.
+
+Run `streamline` from any directory: the UI is embedded, so a working-directory
+shim is unnecessary. Commands launched in the UI inherit the caller's working
+directory. Saved configurations remain in `~/.config/streamline` (or the directory
+selected by `-config-dir`).
 
 - [Architecture and extension diagrams](.memory/architecture.md)
 - [Frontend visual output and virtualization](.memory/frontend.md)
@@ -147,7 +190,7 @@ Commands keep running when you switch tabs or disconnect the browser. Finished
 and stopped output stays available until **Close and discard** or binary shutdown.
 **Run again** starts a new tab and preserves the earlier run.
 
-**Auto** uses the same log detection as stdin: JSON and timestamped logs stream
+**Auto** uses the same log detection as stdin: JSON, logfmt, and timestamped logs stream
 progressively, while unrecognized plain output appears when the command finishes
 or is stopped. **Text** displays each sanitized, nonempty line immediately,
 without interpreting JSON or timestamps. Command tabs without inherited settings
@@ -181,6 +224,13 @@ All sources are in memory. Browser reload discovers existing runs without
 restarting them; restarting the binary discards them. There are no command CLI
 flags, automatic restarts, or Windows command support. Named commands and viewer
 settings can be saved explicitly as described below.
+
+CrowdSec key/value output is detected automatically, for example
+`time="2026-01-03T18:07:22+02:00" level=warning msg="blocked" module=db`.
+It provides normalized timestamp, severity, and message columns while retaining
+all source values as strings. Complete key/value lines such as `status=403` also
+count as logs; use string filters for their fields. See the
+[parser selection and extension guide](.memory/parser.md#parser-selection-and-extension).
 
 The source API is documented in [.memory/transport.md](.memory/transport.md).
 Run `make build` before the command browser tests:

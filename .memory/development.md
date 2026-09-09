@@ -43,9 +43,13 @@ Frontend commands and the development process runner use Bun's runtime through
 | `make dev` | Run API + Vite together; stop both on Ctrl+C or if either exits |
 | `make dev-go` | Compile with `dev`; run API port 8080 with repository `.local/streamline` settings |
 | `make dev-web` | Run Vite on localhost:5173 with hot reload |
-| `make build` | Build frontend, then embed it into `bin/streamline` |
+| `make build` | Build frontend, embed it into `bin/streamline`, and bundle `bin/streamline.<GOOS>.<GOARCH>.tar.gz` |
 | `make run` | Build and start the standalone binary |
 | `make check` | Svelte/TypeScript diagnostics, frontend tests, Go tests/vet with `dev`, formatting check |
+
+Builds default to the host OS and architecture. Override them with, for example,
+`make build GOOS=darwin GOARCH=arm64`; the archive filename includes both target
+values, using Go platform names.
 
 Use `PORT=8081` with Make commands to change the API port; the Vite proxy uses
 the same value. Keep `PORT` nonzero during development. The standalone binary
@@ -113,6 +117,7 @@ application dependencies.
 - `node_modules/` and `web/node_modules/`: frontend dependencies.
 - `internal/webassets/dist/`: generated frontend, including source maps.
 - `bin/streamline`: standalone executable.
+- `bin/streamline.<GOOS>.<GOARCH>.tar.gz`: release archive containing the executable and README.
 
 These directories are ignored by Git. Saved configurations persist separately
 from captured-session data: stdin source bytes, parsed records, raw chunks, and

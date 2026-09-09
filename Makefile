@@ -6,6 +6,10 @@ SHELL := /bin/sh
 GO ?= go
 GOFMT ?= gofmt
 BUN ?= bun
+# Use Go target names (for example, GOOS=darwin GOARCH=arm64).
+GOOS ?= $(shell $(GO) env GOHOSTOS)
+GOARCH ?= $(shell $(GO) env GOHOSTARCH)
+BUILD_ARCHIVE = bin/streamline.$(GOOS).$(GOARCH).tar.gz
 PORT ?= 8080
 
 # export PATH := $(HOMEBREW_PREFIX)/bin:$(BUN_INSTALL)/bin:$(PATH)
@@ -23,7 +27,8 @@ help:
 	  'make dev      Start Go and Vite together (Ctrl+C stops both)' \
 	  'make dev-go   Build and start the development API' \
 	  'make dev-web  Start Vite on localhost:5173' \
-	  'make build    Build bin/streamline with the frontend embedded' \
+	  'make build    Build bin/streamline and bundle bin/streamline.<GOOS>.<GOARCH>.tar.gz' \
+	  '              Optional target: make build GOOS=darwin GOARCH=arm64' \
 	  'make run      Build and run the standalone binary' \
 	  'make check    Run frontend type checks and Go static checks' \
 	  'make serena   Start Serena MCP server'
@@ -44,9 +49,12 @@ dev-web:
 	$(BUN) run --bun --filter @streamline/web dev
 
 build:
+	@printf 'Building Streamline for %s/%s\n' "$(GOOS)" "$(GOARCH)"
 	$(BUN) run --bun --filter @streamline/web build
 	@mkdir -p bin
-	$(GO) build -trimpath -o bin/streamline ./cmd/streamline
+	env GOOS="$(GOOS)" GOARCH="$(GOARCH)" $(GO) build -trimpath -o bin/streamline ./cmd/streamline
+	tar -czf "$(BUILD_ARCHIVE)" -C bin streamline -C "$(CURDIR)" README.md
+	@printf 'Build archive: %s\n' "$(BUILD_ARCHIVE)"
 
 run: build
 	@exec bin/streamline -port "$(PORT)"

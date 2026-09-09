@@ -96,6 +96,17 @@ describe('column value lookup and formatting', () => {
     expect(resolveRowColumnValue(row, 'missing')).toBeUndefined();
   });
 
+  test('renders logfmt normalized columns and original string fields', () => {
+    const row: LogRow = {
+      id: '1', sourceFormat: 'logfmt', timestamp: '2026-01-03T16:07:22Z',
+      severity: 'warn', message: 'blocked 世界',
+      fields: { time: '2026-01-03T18:07:22+02:00', level: 'warning', msg: 'blocked 世界', status: '403' },
+    };
+    expect(['timestamp', 'severity', 'message', 'time', 'level', 'msg', 'status']
+      .map(path => formatColumnValue(resolveRowColumnValue(row, path))))
+      .toEqual(['2026-01-03T16:07:22Z', 'warn', 'blocked 世界', '2026-01-03T18:07:22+02:00', 'warning', 'blocked 世界', '403']);
+  });
+
   test('falls back to the original timestamp when normalization did not recognize it', () => {
     const row: LogRow = {
       id: '1', message: 'invalid timestamp', fields: { timestamp: 'last Tuesday' }, sourceFormat: 'json',

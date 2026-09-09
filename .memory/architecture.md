@@ -11,7 +11,7 @@
 | `internal/logmodel` | Universal typed log records, source formats, parser diagnostics, and deep cloning |
 | `internal/source` | Independent stdin/command captures, process groups, lifecycle, source registry |
 | `internal/ingest` | Reader capture, commit batching, deferred terminal publication |
-| `internal/parse` | Streaming framing, terminal sanitization, stream classification, and journald/JSON/text normalization |
+| `internal/parse` | Streaming framing, terminal sanitization, stream classification, and journald/JSON/logfmt/text normalization |
 | `internal/webassets` | Embedded frontend in release builds; development build excludes assets |
 | `web` | Svelte 5 viewer controller, HTTP/SSE client, 32 MB page cache, dark application shell, and segmented virtual log table |
 | UI foundations | shadcn-svelte configuration, Bits UI, dark neutral theme, class utility, and Lucide icons |
@@ -94,7 +94,7 @@ flowchart LR
   API --> UI["Svelte table or raw panel"]
 ```
 
-- A valid journald JSON object, generic JSON object, or timestamped text line
+- A valid journald JSON object, generic JSON object, complete logfmt line, or timestamped text line
   permanently selects parsed mode. Earlier unrecognized lines are emitted as
   text records; later lines remain records even when individually unrecognized.
 - Until recognition, complete frames are buffered. If recognition never occurs,
@@ -118,6 +118,47 @@ flowchart LR
 
 `ingest`, `parse`, `query`, and `configuration` live under `internal/`.
 Replay profiles and persistent log storage remain future work.
+
+## Parser decision boundaries
+
+The [parser specification](parser.md) separates source configuration from
+record interpretation, stream classification, and terminal status publication.
+These decisions have different owners and lifetimes.
+
+```mermaid
+flowchart LR
+  Mode["Source mode: auto or text"] --> Engine["Engine.Stream invocation"]
+  Engine -->|"auto"| Select["Per-frame selection: parseDecision"]
+  Engine -->|"text"| Literal["plainText and initial recognized=true"]
+  Literal --> Format
+  Literal --> Recognized
+  Select --> Format["Record.SourceFormat and diagnostics"]
+  Select --> Recognized["IdentifiesLogs updates monotonic recognized state"]
+  Recognized --> Result["Final result: parsed or raw"]
+  Format --> Ingest["ingest.Capture batches entries"]
+  Result --> Complete["Completion: raw text or read error"]
+  Ingest --> Query["MemoryService: pending, records, or raw"]
+  Complete --> Owner["Source owner combines capture and process completion"]
+  Owner --> Status["Terminal input status: eof or error"]
+  Status --> Query
+```
+
+Text mode bypasses per-frame format selection and initializes recognition to
+true. Auto uses explicit precedence: JSON-shaped input (journald specialization
+before generic JSON), complete logfmt, timestamped text, and text fallback.
+The same source can contain several `SourceFormat` values. A text record is not
+evidence of configured Text mode, and `raw` is a result variant rather than a
+parser choice.
+
+Recognition enables parser callbacks; ingestion batching determines when query
+records become visible. Terminal status is published independently. For command
+sources, pipe EOF must be combined with process completion before reporting
+success or failure. Exact source intervals exist at the parser boundary;
+ingestion transports normalized entries and does not retain those intervals.
+See [selection](parser.md#parser-selection-and-extension),
+[classification](parser.md#stream-classification-state-machine), and
+[publication](parser.md#capture-publication-and-terminal-status) for the detailed
+algorithms and transition diagrams.
 
 ## Planned extensions
 
