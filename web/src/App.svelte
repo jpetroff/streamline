@@ -2,12 +2,15 @@
   import { onMount } from 'svelte';
   import { provideKeyboard } from '$lib/keyboard-context';
   import SourceViewer from '$lib/components/SourceViewer.svelte';
+  import ConfigurationSettings from '$lib/components/ConfigurationSettings.svelte';
+  import { configurationFromPreferences, HTTPConfigurationAPI } from '$lib/configurations';
   import { HTTPSourceAPI, type SourcePreferences } from '$lib/transport/sources';
   import type { LogSource } from '$lib/transport/types';
 
   const keyboard = provideKeyboard();
   const api = new HTTPSourceAPI();
   const preferences = new Map<string, SourcePreferences>();
+  let activeViewer = $state<ReturnType<typeof SourceViewer>>();
   let sources = $state<LogSource[]>([]);
   let selected = $state('stdin');
   let sourceKind = $state('stdin');
@@ -50,14 +53,35 @@
     if (creating || !text.trim()) return;
     creating = true; error = '';
     const requestIntent = intent;
+    const current = activeViewer?.snapshot();
+    // Untouched stdin columns target original JSON; preserve normalized defaults for a first command.
+    const prepared = selected !== 'stdin' || current?.inheritOnRun ? current : undefined;
     try {
       const created = await api.create({ command: text, mode: parseMode });
       if (!alive) return;
       // The SSE event can arrive before this HTTP response. Keep its newer state.
       if (!sources.some(source => source.id === created.id)) sources = [...sources, created];
+      if (prepared) preferences.set(created.id, { ...prepared, following: true, offset: undefined, rowLines: 1 });
       if (requestIntent === intent) select(created.id);
     } catch (err) { if (alive) error = err instanceof Error ? err.message : String(err); }
     finally { creating = false; }
+  }
+  function captureConfiguration() {
+    if (!activeViewer) throw new Error('Wait for the active tab to connect.');
+    return configurationFromPreferences(activeViewer.snapshot(), selectedInfo?.command ?? '', selectedInfo?.mode ?? 'auto');
+  }
+  async function loadConfiguration(id: string) {
+    const target = activeViewer;
+    const requestIntent = intent;
+    if (!target) throw new Error('Wait for the active tab to connect.');
+    const configurationAPI = new HTTPConfigurationAPI();
+    const { document: doc } = await configurationAPI.get(id);
+    await configurationAPI.validate(doc);
+    if (intent !== requestIntent || activeViewer !== target) throw new Error('The active tab changed.');
+    await target.applyConfiguration(doc);
+    if (intent !== requestIntent || activeViewer !== target) throw new Error('The active tab changed.');
+    command = doc.command; mode = doc.mode;
+    sourceKind = doc.command.trim() ? 'command' : selected === 'stdin' ? 'stdin' : 'command';
   }
   async function changeSource(remove: boolean) {
     if (selected === 'stdin' || changing) return;
@@ -98,6 +122,7 @@
         </button>
       {/each}
     </nav>
+    <ConfigurationSettings capture={captureConfiguration} onLoad={loadConfiguration} />
   </header>
   {#if sourceKind === 'command'}
     <form class="shrink-0 space-y-2 border-b bg-shell px-3 py-2" aria-label="Run command" onsubmit={event => { event.preventDefault(); void run(); }}>
@@ -125,6 +150,6 @@
   {#if error || connectionError}<div role="alert" class="shrink-0 border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{error || connectionError}</div>{/if}
   {#key selected}
     {@const id = selected}
-    <SourceViewer sourceId={id} info={selectedInfo} preferences={preferences.get(id)} onSave={saved => { if (id === 'stdin' || sources.some(source => source.id === id)) preferences.set(id, saved); }} />
+    <SourceViewer bind:this={activeViewer} sourceId={id} info={selectedInfo} preferences={preferences.get(id)} onSave={saved => { if (id === 'stdin' || sources.some(source => source.id === id)) preferences.set(id, saved); }} />
   {/key}
 </div>

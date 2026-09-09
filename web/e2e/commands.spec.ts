@@ -31,6 +31,7 @@ async function run(page: Page, command: string, mode = 'text') {
   await page.getByLabel('Command', { exact: true }).fill(command);
   await page.getByLabel('Output mode').selectOption(mode);
   await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await expect(page.getByRole('navigation', { name: 'Log sources' }).locator('button[aria-pressed="true"]')).toHaveAttribute('title', command);
 }
 
 test('concurrent commands retain isolated output, reruns, and stopped tabs across reload', async ({ page }) => {
@@ -77,6 +78,9 @@ test('source switching restores search, columns, and paused row position', async
   await page.getByRole('button', { name: 'Go', exact: true }).click();
   await expect(page.locator('[data-offset="19"][aria-current="true"]')).toBeVisible();
   await run(page, "printf 'other source\\n'");
+  await expect(page.getByLabel('Search', { exact: true })).toHaveValue('record');
+  await page.getByLabel('Search', { exact: true }).fill('');
+  await page.getByLabel('Search', { exact: true }).press('Control+Enter');
   await expect(page.getByRole('cell', { name: 'other source', exact: true })).toBeVisible();
   await page.getByRole('navigation', { name: 'Log sources' }).getByRole('button', { name: /while/ }).click();
   await expect(page.getByLabel('Search', { exact: true })).toHaveValue('record');
@@ -126,6 +130,9 @@ test('applied field filters survive switching command sources', async ({ page })
   await page.getByRole('region', { name: 'Filters', exact: true }).getByRole('button', { name: 'Apply', exact: true }).click();
   await expect(page.getByRole('cell', { name: 'drop', exact: true })).toHaveCount(0);
   await run(page, "printf 'another source\\n'");
+  await expect(page.getByRole('textbox', { name: 'Value for filter 1' })).toHaveValue('info');
+  await page.getByRole('button', { name: 'Clear all', exact: true }).click();
+  await page.getByRole('region', { name: 'Filters', exact: true }).getByRole('button', { name: 'Apply', exact: true }).click();
   await expect(page.getByRole('cell', { name: 'another source', exact: true })).toBeVisible();
   await page.getByRole('navigation', { name: 'Log sources' }).getByRole('button', { name: /keep/ }).click();
   await expect(page.getByRole('textbox', { name: 'Field for filter 1' })).toHaveValue('level');

@@ -2,8 +2,9 @@
 
 Search is a query-scoped predicate over parsed log values. The browser owns
 editing and syntax feedback; Go owns query acceptance and matching. Defaults
-are Plain, OR, and case-insensitive. Search is session-local; raw output and
-saved searches are excluded.
+are Plain, OR, and case-insensitive. Applied search is retained per source and can
+be persisted in [saved configurations](saved-configurations.md). Raw-output search
+is excluded.
 
 ## Architecture
 
@@ -79,7 +80,10 @@ tradeoff is separate syntax acceptance: JS-valid lookaround/backreferences can
 fail on Apply, and Go-only syntax can fail in the browser. The editor supports
 the overlap accepted by both engines; Go determines matching semantics. There
 is no syntax translation or promise of JS/Go semantic parity. Direct API clients
-receive Go validation only.
+receive Go validation only. The saved-configuration editor treats browser regex
+errors as advisory; Save and Load require Go validation. `ValidateSearch` exposes
+compilation without allocating a query. Configuration loads reset the search draft
+after successful application, including when the applied value is unchanged.
 
 Invalid expressions return HTTP 400 with no query allocation:
 

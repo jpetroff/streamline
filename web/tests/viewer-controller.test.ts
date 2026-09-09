@@ -421,3 +421,45 @@ test('a recreated source viewer starts with its saved query and releases late so
   expect(controller.state.displayed).toBeUndefined();
   expect(api.deleted).toContain('old-source-query');
 });
+
+test('configuration replacement waits for building query and its first page', async () => {
+  class BuildingAPI extends FakeAPI {
+    receive?: (event: QueryEvent) => void;
+    page = deferred<RowPage>();
+    events(_id: string, onEvent: (event: QueryEvent) => void) { this.receive = onEvent; return { close() {} }; }
+    rows() { return this.page.promise; }
+  }
+  const api = new BuildingAPI();
+  const controller = new ViewerController(api);
+  let completed = false;
+  const applying = controller.setQueryAndWait({ filter: [], sort: 'input', search: { text: 'saved', mode: 'plain', operator: 'or' } }).then(error => { completed = true; return error; });
+  api.creates.get('')!.resolve({ queryId: 'saved', status: 'building' });
+  await settle(); expect(completed).toBe(false);
+  api.receive!({ type: 'state', state: ready('saved'), session: await api.session() });
+  await settle(); expect(completed).toBe(false);
+  api.page.resolve({ snapshot: ready('saved').snapshot!, offset: '0', rows: [{ id: '1', message: 'saved', sourceFormat: 'text' }] });
+  expect(await applying).toBeUndefined();
+  expect(controller.state.displayed?.search?.text).toBe('saved');
+  controller.dispose();
+});
+
+test('failed configuration replacement reports failure and retains the previous display', async () => {
+  const api = new FakeAPI(), controller = new ViewerController(api);
+  const initial = controller.setQuery([]); api.creates.get('')!.resolve(ready('old')); await initial;
+  const applying = controller.setQueryAndWait({ filter: [{ field: 'level', op: 'eq', value: 'new' }], sort: 'input' });
+  api.creates.get('new')!.reject(new TransportError('invalid_filter', 'Rejected', 400));
+  expect((await applying)?.code).toBe('invalid_filter');
+  expect(controller.state.displayed?.queryId).toBe('old');
+  controller.dispose();
+});
+
+test('superseding or disposing a loading configuration settles its caller and ignores late responses', async () => {
+  const api = new FakeAPI(), controller = new ViewerController(api);
+  const first = controller.setQueryAndWait({ filter: [{ field: 'level', op: 'eq', value: 'first' }], sort: 'input' });
+  const second = controller.setQueryAndWait({ filter: [{ field: 'level', op: 'eq', value: 'second' }], sort: 'input' });
+  expect((await first)?.code).toBe('configuration_superseded');
+  controller.dispose();
+  expect((await second)?.code).toBe('configuration_superseded');
+  api.creates.get('first')!.resolve(ready('first')); api.creates.get('second')!.resolve(ready('second'));
+  await settle(); expect(controller.state.displayed).toBeUndefined();
+});

@@ -4,8 +4,9 @@
 
 | Area | Responsibility |
 | --- | --- |
-| `cmd/streamline` | CLI port, loopback listener, source-manager startup, graceful shutdown |
-| `internal/httpapi` | Versioned session/query JSON endpoints, bounded row/raw pages, SSE state notifications, and health |
+| `cmd/streamline` | CLI port/configuration directory, loopback listener, source-manager and settings-store injection, graceful shutdown |
+| `internal/httpapi` | Versioned source/query/configuration JSON endpoints, bounded row/raw pages, SSE state notifications, and health |
+| `internal/configuration` | Versioned saved documents, validation, configuration directories, atomic JSON file storage |
 | `internal/query` | In-memory query lifecycle, immutable snapshot boundaries, live result indexes, subscriptions, and compiler boundary |
 | `internal/logmodel` | Universal typed log records, source formats, parser diagnostics, and deep cloning |
 | `internal/source` | Independent stdin/command captures, process groups, lifecycle, source registry |
@@ -22,7 +23,8 @@ filters and plain/regexp search in input order. Profiles, graphs, and a shared
 filter-expression syntax remain future work. See [Command log sources](command-sources.md)
 for process ownership, lifecycle diagrams, and debugging entry points.
 See [parser flow and revisitable decisions](parser.md) for the implemented
-normalization boundary.
+normalization boundary. [Saved configurations](saved-configurations.md) documents
+file persistence, live snapshots, and command preparation.
 
 ## Implemented binary–frontend protocol
 
@@ -75,8 +77,8 @@ or Docker. The HTTP server starts immediately and ingestion runs in the
 background. Memory may grow: the parser retains exact source bytes while the
 stream is open, and the query service retains normalized records or terminal
 raw chunks plus query indexes. There is no automatic eviction, database, disk
-spill, or application persistence. Bounded batches control publication latency,
-not retention.
+spill, or captured-session persistence. Named configurations use separate JSON
+files. Bounded batches control publication latency, not retention.
 
 ```mermaid
 flowchart LR
@@ -114,8 +116,8 @@ flowchart LR
 - Pausing the view or disconnecting the browser does not stop capture. EOF
   flushes pending records and leaves the viewer running.
 
-`ingest`, `parse`, and `query` now live under `internal/`; profile and
-persistent storage packages remain future work.
+`ingest`, `parse`, `query`, and `configuration` live under `internal/`.
+Replay profiles and persistent log storage remain future work.
 
 ## Planned extensions
 
@@ -133,7 +135,8 @@ persistent storage packages remain future work.
 
 ## Later: storage middleware
 
-This is a future extension boundary, not implemented storage code.
+This is a future log-storage extension boundary. Saved configuration files do
+not implement captured-record or query-index persistence.
 
 ```mermaid
 flowchart TB
@@ -171,6 +174,7 @@ contract tests against memory and future persistent providers.
 
 - [Frontend visual output](frontend.md)
 - [Keyboard navigation framework](keyboard-navigation.md)
+- [Saved configurations](saved-configurations.md)
 - [shadcn-svelte](https://www.shadcn-svelte.com/docs)
 - [TanStack Svelte Virtual](https://tanstack.com/virtual/latest/docs/framework/svelte/svelte-virtual)
 - [Journal export formats](https://systemd.io/JOURNAL_EXPORT_FORMATS/)

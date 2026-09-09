@@ -17,7 +17,7 @@ Paths below are relative to the repository root.
 | `web/src/lib/components/VirtualLogTable.svelte` | Row commands, `navigate`, virtual scrolling, focus restoration, selection/follow coordination |
 | `web/src/lib/row-navigation.ts`, `web/src/lib/virtual-window.ts` | Navigation interfaces, bigint validation, clamping, bounded segments |
 | `web/src/lib/components/{SearchEditor,ColumnSidebar,FilterEditor,TableToolbar}.svelte` | Editor focus, scoped Apply, filter insertion, jump input |
-| `web/src/lib/components/{FilterEditor,SampleLogPopover}.svelte` | Modal and popover registration |
+| `web/src/lib/components/{FilterEditor,SampleLogPopover,ConfigurationSettings}.svelte` | Modal and popover registration; settings owns scoped Save and dirty-dismissal guards |
 | `web/src/lib/transport/{viewer-controller,viewer-state}.ts` | Page requests, immutable snapshots, pause/resume, stale-response guards |
 
 ## Ownership and registration
@@ -130,6 +130,11 @@ An open modal restricts dispatch to scopes inside it. The import dialog register
 its own scoped `Mod+Enter`. Escape is left to the overlay library; otherwise
 `SourceViewer.svelte` closes preview before returning focus to the active row. Sample
 popovers register async closing that awaits `tick()` before a focus command runs.
+
+`ConfigurationSettings.svelte` registers a modal overlay and `configurations.save`
+with scoped `Mod+Enter`. Bits UI traps focus and restores the toolbar trigger.
+Escape/outside dismissal prevents closing while busy or while a dirty draft awaits
+save/discard. See [saved configurations](saved-configurations.md#validation-and-interaction).
 
 ## Row navigation and async focus
 

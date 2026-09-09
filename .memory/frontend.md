@@ -6,7 +6,8 @@ reactivity, viewport paging, row virtualization, follow behavior, accessibility,
 and the annotation conventions used by the code.
 
 The frontend is a presentation client. Go owns stdin/command capture, classification,
-parsing, result indexes, raw chunks, and immutable snapshots. Svelte owns the
+parsing, result indexes, raw chunks, immutable snapshots, and saved configuration
+files. Svelte owns the
 browser lifecycle, visible state, scrolling, and DOM projection. It shows a
 waiting state, parsed virtual rows, or terminal raw text according to session
 `inputKind`.
@@ -19,8 +20,10 @@ in [Keyboard navigation framework](keyboard-navigation.md).
 | Source | Responsibility |
 | --- | --- |
 | `web/src/App.svelte` | Source controls/list, selection, preference map, keyboard registry, viewport shell |
-| `web/src/lib/components/SourceViewer.svelte` | Active controller, panels, row selection, save/restore on source switch |
-| `web/src/lib/transport/sources.ts` | Source HTTP/SSE client and saved preference type |
+| `web/src/lib/components/SourceViewer.svelte` | Active controller, panels, row selection, live snapshots, saved-configuration application, save/restore on source switch |
+| `web/src/lib/components/ConfigurationSettings.svelte` | Settings dialog, saved-entry list, text editor, dirty-state and focus ownership |
+| `web/src/lib/configurations.ts` | Configuration/draft types, serialization, validation feedback, HTTP client |
+| `web/src/lib/transport/sources.ts` | Source HTTP/SSE client and in-memory source preference type |
 | `web/src/lib/side-panels.ts` | Shared panel definitions, defaults, and sizing policy |
 | `web/src/lib/components/SidePanel.svelte` | Reusable panel shell, visibility, and resizing |
 | `web/src/app.css` | Dark-only tokens, Tailwind theme mapping, viewport containment |
@@ -37,7 +40,8 @@ in [Keyboard navigation framework](keyboard-navigation.md).
 
 `html`, `body`, and `#app` occupy the viewport and hide document overflow.
 `App.svelte` places the source toolbar and optional command editor/status controls
-above a keyed `SourceViewer`. The viewer is a horizontal flex layout: Columns/Filters,
+above a keyed `SourceViewer`. The toolbar settings trigger opens a modal
+[configuration editor](saved-configurations.md). The viewer is a horizontal flex layout: Columns/Filters,
 main region, and Row details. Panels fill the remaining viewport height.
 The central region stacks the table, compact table toolbar, and search editor;
 all three share the width left between the panels. `min-h-0` and `min-w-0` let each region shrink without
@@ -114,6 +118,13 @@ starts only in `onMount`. This keeps resource ownership aligned with the Svelte
 component lifetime. Source switching leaves capture running and recreates only
 the viewer query. Saved preferences exclude row caches and snapshot tokens.
 See [source switching and notifications](command-sources.md#viewer-switching-and-notifications).
+
+`snapshot()` copies the retained applied specification and current column settings
+without unmounting. `applyConfiguration()` submits filters/search together through
+`setQueryAndWait`, then commits columns and increments editor revision keys. Raw
+input retains the specification without querying. Load guards the original tab
+across file reads, validation, and query replacement. Run seeds inherited settings
+before mounting its new viewer; persisted bundles exclude session preferences.
 
 `viewer` and `controller` are passed to either `VirtualLogTable` or
 `RawOutput` as typed `$props`. Components do not call `fetch` or construct

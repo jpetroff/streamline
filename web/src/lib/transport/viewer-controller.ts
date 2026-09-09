@@ -24,6 +24,23 @@ export class ViewerController {
   private listeners = new Set<(state: ViewerState) => void>();
   private requestedRevision = new Map<string, bigint>();
   private disposed = false;
+  private replacement?: { resolve: (error: APIErrorBody | undefined) => void };
+
+  /** Waits for the replacement display, not merely query creation. */
+  setQueryAndWait(spec: QuerySpec): Promise<APIErrorBody | undefined> {
+    const request = this.setQuery(spec.filter, spec.sort, spec.search);
+    return new Promise(resolve => {
+      const replacement = { resolve };
+      this.replacement = replacement;
+      void request.then(error => { if (error && this.replacement === replacement) this.finishReplacement(error); });
+    });
+  }
+
+  private finishReplacement(error?: APIErrorBody) {
+    const replacement = this.replacement;
+    this.replacement = undefined;
+    replacement?.resolve(error);
+  }
 
   /** Creates one independent viewer controller, suitable for a single browser tab. */
   constructor(private readonly api: QueryAPI = new HTTPQueryAPI()) {}
@@ -65,6 +82,7 @@ export class ViewerController {
 
   /** Builds a replacement query while preserving the current display until its first page is ready. */
   async setQuery(filter: readonly FilterSpec[], sort: QuerySort = 'input', search?: SearchSpec): Promise<APIErrorBody | undefined> {
+    this.finishReplacement({ code: 'configuration_superseded', message: 'Configuration loading was superseded.' });
     // Copy caller-owned options before asynchronous work; recovery must replay
     // the confirmed query, never whatever the editor currently contains.
     const spec: QuerySpec = { filter: cloneFilters(filter), sort, search: search ? { ...search } : undefined };
@@ -198,6 +216,7 @@ export class ViewerController {
 
   /** Cancels requests, closes streams, and releases server and browser query resources. */
   dispose() {
+    this.finishReplacement({ code: 'configuration_superseded', message: 'The active tab changed.' });
     this.disposed = true;
     this.intent++;
     this.rangeRequest++;
@@ -360,6 +379,8 @@ export class ViewerController {
   private dispatch(action: Parameters<typeof reduceViewer>[1]) {
     this.state = reduceViewer(this.state, action);
     for (const listener of this.listeners) listener(this.state);
+    if (action.type === 'replace' || action.type === 'rawStart') this.finishReplacement();
+    if (action.type === 'failed') this.finishReplacement(action.error);
   }
 }
 

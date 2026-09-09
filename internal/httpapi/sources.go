@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"streamline/internal/configuration"
 	"streamline/internal/query"
 	"streamline/internal/source"
 )
@@ -17,6 +18,15 @@ import (
 // routes remain aliases for stdin. Additional trusted origins are development-only
 // and may use a wildcard subdomain, such as https://*.coder.intranet.
 func NewSourceHandler(frontend http.Handler, manager *source.Manager, trustedOrigins ...string) http.Handler {
+	return newSourceHandler(frontend, manager, nil, trustedOrigins...)
+}
+
+// NewConfiguredSourceHandler includes persistent settings without changing legacy callers.
+func NewConfiguredSourceHandler(frontend http.Handler, manager *source.Manager, store *configuration.Store, trustedOrigins ...string) http.Handler {
+	return newSourceHandler(frontend, manager, store, trustedOrigins...)
+}
+
+func newSourceHandler(frontend http.Handler, manager *source.Manager, store *configuration.Store, trustedOrigins ...string) http.Handler {
 	stdin, _ := manager.Queries("stdin")
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/sources", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, manager.List()) })
@@ -114,7 +124,11 @@ func NewSourceHandler(frontend http.Handler, manager *source.Manager, trustedOri
 		NewHandler(http.NotFoundHandler(), service).ServeHTTP(w, forwarded)
 	}))
 	mux.Handle("/", NewHandler(frontend, stdin))
-	return sourceRequests(mux, trustedOrigins)
+	var routes http.Handler = mux
+	if store != nil {
+		routes = WithConfigurations(routes, store)
+	}
+	return sourceRequests(routes, trustedOrigins)
 }
 
 func emptySourceBody(w http.ResponseWriter, r *http.Request) bool {
@@ -148,10 +162,11 @@ func sourceRequests(next http.Handler, trustedOrigins []string) http.Handler {
 			// A required non-simple header also prevents form posts and unapproved CORS
 			// requests from invoking source lifecycle operations without an Origin.
 			sourceMutation := r.URL.Path == "/api/v1/sources" || (strings.HasPrefix(r.URL.Path, "/api/v1/sources/") && (strings.HasSuffix(r.URL.Path, "/stop") || r.Method == http.MethodDelete && strings.Count(r.URL.Path, "/") == 4))
-			if sourceMutation {
+			configurationMutation := r.URL.Path == "/api/v1/configurations" || strings.HasPrefix(r.URL.Path, "/api/v1/configurations/")
+			if sourceMutation || configurationMutation {
 				contentType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 				if contentType != "application/json" || r.Header.Get("X-Streamline-Request") != "1" {
-					writeError(w, 415, &query.APIError{Code: "invalid_content_type", Message: "source operations require application/json and X-Streamline-Request: 1"})
+					writeError(w, 415, &query.APIError{Code: "invalid_content_type", Message: "operations require application/json and X-Streamline-Request: 1"})
 					return
 				}
 			}

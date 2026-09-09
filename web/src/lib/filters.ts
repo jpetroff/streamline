@@ -22,7 +22,7 @@ export function filtersEqual(left: readonly FilterSpec[], right: readonly Filter
 }
 
 /** Validates arbitrary imported JSON as well as builder drafts without sampling log types. */
-export function validateFilters(value: unknown): FilterError[] {
+export function validateFilters(value: unknown, checkRegex = true): FilterError[] {
   if (!Array.isArray(value)) return [{ index: 0, property: '', message: 'Filters must be a JSON array.' }];
   const errors: FilterError[] = [];
   value.forEach((filter: unknown, position) => {
@@ -38,7 +38,7 @@ export function validateFilters(value: unknown): FilterError[] {
     if (isNumericOperator(item.op as string)) {
       if (typeof item.value !== 'number' || !Number.isFinite(item.value)) report('value', 'Numeric operators require a finite number value.');
     } else if (typeof item.value !== 'string') report('value', 'Text operators require a string value.');
-    else if (isRegexOperator(item.op as string)) {
+    else if (checkRegex && isRegexOperator(item.op as string)) {
       const message = validateRegex(item.value);
       if (message) report('value', message);
     }

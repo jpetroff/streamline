@@ -38,7 +38,7 @@ dev:
 dev-go:
 	@mkdir -p .cache/bin
 	$(GO) build -tags=dev -o .cache/bin/streamline-dev ./cmd/streamline
-	@exec .cache/bin/streamline-dev -port "$(PORT)"
+	@exec .cache/bin/streamline-dev -port "$(PORT)" -config-dir "$(CURDIR)/.local/streamline"
 
 dev-web:
 	$(BUN) run --bun --filter @streamline/web dev

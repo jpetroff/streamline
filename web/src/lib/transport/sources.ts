@@ -9,6 +9,8 @@ export interface SourcePreferences {
   following: boolean;
   offset?: bigint;
   rowLines: 1 | 2;
+  /** Explicit settings should carry from stdin into a command, including a loaded default-looking bundle. */
+  inheritOnRun?: boolean;
 }
 
 export class HTTPSourceAPI {

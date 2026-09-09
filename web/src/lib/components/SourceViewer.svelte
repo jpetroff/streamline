@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
+  import type { Configuration } from '$lib/configurations';
   import { registerCommand } from '$lib/keyboard-context';
   import type { ActiveRow, RowNavigator } from '$lib/row-navigation';
   import { configureColumns, DEFAULT_COLUMNS, type DateDisplayFormat } from '$lib/columns';
@@ -31,6 +32,31 @@
   let columns = $state(initial?.columns ?? configureColumns(untrack(() => sourceId === 'stdin' ? DEFAULT_COLUMNS : ['timestamp', 'severity', 'message'])));
   let columnPaths = $derived(columns.map(column => column.path));
 
+  let retainedSpec = $state<QuerySpec>(initial?.spec ?? { filter: [], sort: 'input' });
+  let editorRevision = $state(0);
+  let configurationIntent = 0;
+  let inheritOnRun = $state(initial?.inheritOnRun ?? false);
+
+  export function snapshot(): SourcePreferences {
+    return { spec: { filter: retainedSpec.filter.map(filter => ({ ...filter })), sort: retainedSpec.sort, search: retainedSpec.search ? { ...retainedSpec.search } : undefined },
+      columns: columns.map(column => ({ ...column })), following: viewer.following, offset: activeRow?.offset, rowLines, inheritOnRun };
+  }
+
+  export async function applyConfiguration(doc: Configuration) {
+    if (!viewer.session) throw new Error('Wait for the source to connect, then load again.');
+    const request = ++configurationIntent;
+    const spec: QuerySpec = { filter: doc.filters.filter.map(filter => ({ ...filter })), search: { ...doc.filters.search }, sort: 'input' };
+    if (viewer.session.inputKind !== 'raw') {
+      const error = await controller.setQueryAndWait(spec);
+      if (error) throw new Error(error.message);
+    }
+    if (!mounted || request !== configurationIntent) throw new Error('The active tab changed.');
+    retainedSpec = spec;
+    inheritOnRun = true;
+    columns = doc.columns.map(column => ({ ...column }));
+    editorRevision++;
+  }
+
   let rowLines = $state<1 | 2>(initial?.rowLines ?? 1);
   let columnsOpen = $state(COLUMNS_PANEL.initiallyOpen);
   let columnsPanelWidth = $state<number>();
@@ -38,12 +64,13 @@
 
   // Own the controller for exactly the lifetime of the root Svelte component.
   onMount(() => {
-    const unsubscribe = controller.subscribe(next => { viewer = next; });
+    const unsubscribe = controller.subscribe(next => {
+      viewer = next;
+      if (next.displayed) retainedSpec = { filter: next.displayed.filter, sort: next.displayed.sort, search: next.displayed.search };
+    });
     void controller.start(initial?.spec);
     return () => {
-      const applied = viewer.displayed ?? initial?.spec;
-      const spec: QuerySpec = { filter: applied?.filter ?? [], sort: applied?.sort ?? 'input', search: applied?.search };
-      onSave({ spec, columns, following: viewer.following, offset: activeRow?.offset, rowLines });
+      onSave(snapshot());
       unsubscribe();
       controller.dispose();
     };
@@ -81,10 +108,12 @@
   });
 
   function applyColumns(paths: string[]) {
+    inheritOnRun = true;
     columns = configureColumns(paths, columns);
   }
 
   function setDateFormat(index: number, dateFormat: DateDisplayFormat) {
+    inheritOnRun = true;
     columns = columns.map((column, columnIndex) => (
       columnIndex === index ? { ...column, dateFormat } : column
     ));
@@ -93,7 +122,9 @@
 
   <div class="flex min-h-0 min-w-0 flex-1 overflow-hidden">
     <SidePanel definition={COLUMNS_PANEL} open={columnsOpen} bind:preferredWidth={columnsPanelWidth}>
-      <ColumnSidebar initialFilter={initial?.spec.filter} {viewer} appliedColumns={columnPaths} onApply={applyColumns} onApplyFilters={filters => controller.setFilters(filters)} />
+      {#key editorRevision}
+      <ColumnSidebar initialFilter={retainedSpec.filter} {viewer} appliedColumns={columnPaths} onApply={applyColumns} onApplyFilters={filters => { inheritOnRun = true; return controller.setFilters(filters); }} />
+      {/key}
     </SidePanel>
     <main class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="Streamline">
       {#if viewer.error}
@@ -132,11 +163,13 @@
       </div>
       <TableToolbar bind:rowLines bind:columnsOpen showRowControls={viewer.session?.inputKind === 'records'} total={BigInt(viewer.displayed?.snapshot.matchedCount ?? 0)} {activeRow} {navigator} />
       {#if viewer.session?.inputKind === 'records'}
+        {#key editorRevision}
         <SearchEditor
-          applied={viewer.displayed?.search ?? initial?.spec.search}
+          applied={retainedSpec.search}
           pending={viewer.pending !== undefined}
-          onApply={search => controller.setSearch(search)}
+          onApply={search => { inheritOnRun = true; return controller.setSearch(search); }}
         />
+        {/key}
       {/if}
     </main>
     <SidePanel definition={ROW_DETAILS_PANEL} open={previewOpen} bind:preferredWidth={detailsPanelWidth}>

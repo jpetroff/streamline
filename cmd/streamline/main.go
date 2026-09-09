@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"streamline/internal/configuration"
 	"streamline/internal/httpapi"
 	"streamline/internal/source"
 	"streamline/internal/webassets"
@@ -21,18 +22,24 @@ import (
 
 func main() {
 	port := flag.Int("port", 8080, "localhost port (0 selects an available port)")
+	configDir := flag.String("config-dir", "", "directory for saved configurations")
 	flag.Parse()
 	if *port < 0 || *port > 65535 {
 		slog.Error("port must be between 0 and 65535")
 		os.Exit(2)
 	}
-	if err := run(*port); err != nil {
+	directory, err := configuration.ResolveDirectory(*configDir)
+	if err != nil {
+		slog.Error("resolve configuration directory", "error", err)
+		os.Exit(2)
+	}
+	if err := run(*port, directory); err != nil {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(port int) error {
+func run(port int, directory string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -51,7 +58,7 @@ func run(port int) error {
 	sources.StartStdin(stdin)
 
 	server := &http.Server{
-		Handler:           httpapi.NewSourceHandler(webassets.Handler(), sources, webassets.TrustedOrigins()...),
+		Handler:           httpapi.NewConfiguredSourceHandler(webassets.Handler(), sources, configuration.New(directory), webassets.TrustedOrigins()...),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}

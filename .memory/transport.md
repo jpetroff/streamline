@@ -222,9 +222,10 @@ and has input status `eof`. Failed commands retain output and report input statu
 Source mutations require `Content-Type: application/json` and
 `X-Streamline-Request: 1`. Stop/Delete accept an empty body or `{}`. Blank commands,
 NUL bytes, unknown modes/fields, oversized requests, and mutations of stdin are
-rejected. Unknown source IDs return `source_not_found` (404). All requests require
-a loopback Host, and mutations require same-origin browser requests. Release
-builds trust no additional origins; dev builds allow the explicit Vite origins.
+rejected. Unknown source IDs return `source_not_found` (404). The server listens on
+loopback; mutations validate browser origins against the request Host. Release
+builds trust no additional origins; dev builds also allow configured Vite/test
+origins and `https://*.coder.intranet`.
 No CORS permission is granted to unrelated websites.
 
 The UI uses one source-list SSE connection and one active viewer controller
@@ -233,3 +234,40 @@ sources disposes query resources and retains only viewer preferences; returning
 creates a fresh query and restores the selected result position. Log ingestion
 is independent of all HTTP connections. Raw output uses the existing bounded
 chunk API; SSE never carries log rows.
+
+
+## Saved configurations
+
+The settings API is backed by the binary's configuration directory, independent of
+source/query lifetimes. Production defaults to `~/.config/streamline`; development
+launches with an absolute repository `.local/streamline` path. `-config-dir` overrides
+both. [Saved configurations](saved-configurations.md) documents implementation,
+state transitions, and filesystem behavior. Each `configs/<id>.json` contains the
+v1 document shown in [README](../README.md#saved-configurations).
+IDs are safe filename stems (1–128 ASCII letters, digits, `_`, `-`, starting with an
+alphanumeric); API creates use random IDs, while copied files can use readable stems.
+
+| Method and path | Response |
+| --- | --- |
+| `GET /api/v1/configurations` | `200 {directory, entries: [{id, document}], errors: [{file, message, issues?}]}` |
+| `GET /api/v1/configurations/{id}` | `200 {id, document}`; freshly read and validated |
+| `POST /api/v1/configurations` | `201 {id, document}`; request body is a complete document |
+| `PUT /api/v1/configurations/{id}` | `200 {id, document}`; replaces an existing valid entry |
+| `POST /api/v1/configurations/validate` | `200 document`; validates without filesystem writes, queries, or process execution |
+
+All documents require `version`, `name`, `command`, `mode`, `columns`, and `filters`.
+`filters` requires `filter: FilterSpec[]` and `search: {text, mode, operator}`.
+The command may be empty. Responses are non-cacheable. Mutations require the same
+origin checks as source operations, `Content-Type: application/json`, and
+`X-Streamline-Request: 1`. Request bodies and stored files are limited to 64 KiB.
+
+Errors use `{error: {code, message, configurationErrors}}`, where issues are
+`{field, message, index?, line?}`. Indices identify one-based columns/filters;
+lines identify one-based physical search lines. `invalid_configuration` is 400,
+`configuration_not_found` is 404, and `configuration_storage_error` is 500.
+List isolates errors in individual files so other entries remain usable. Unsupported
+versions and malformed files are never rewritten. There is no delete endpoint,
+watch stream, automatic history, or server-side load/execute endpoint.
+
+Loading and command inheritance are frontend operations; see
+[state transitions](saved-configurations.md#state-transitions).

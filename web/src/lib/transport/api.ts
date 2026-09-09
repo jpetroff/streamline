@@ -1,9 +1,10 @@
+import type { ConfigurationIssue } from '$lib/configurations';
 import type { FilterError, LineError, QueryEvent, QuerySpec, QueryState, RawChunkPage, RowPage, Session } from './types';
 
 /** Structured transport failure carrying the server's stable error code and HTTP status. */
 export class TransportError extends Error {
   /** Creates an error carrying the stable server code and HTTP status. */
-  constructor(public readonly code: string, message: string, public readonly status: number, public readonly lineErrors?: LineError[], public readonly filterErrors?: FilterError[]) {
+  constructor(public readonly code: string, message: string, public readonly status: number, public readonly lineErrors?: LineError[], public readonly filterErrors?: FilterError[], public readonly configurationErrors?: ConfigurationIssue[]) {
     super(message);
   }
 }
@@ -13,7 +14,7 @@ export async function responseJSON<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = body?.error;
-    throw new TransportError(error?.code ?? 'http_error', error?.message ?? response.statusText, response.status, error?.lineErrors, error?.filterErrors);
+    throw new TransportError(error?.code ?? 'http_error', error?.message ?? response.statusText, response.status, error?.lineErrors, error?.filterErrors, error?.configurationErrors);
   }
   return body as T;
 }

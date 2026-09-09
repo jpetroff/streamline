@@ -18,11 +18,9 @@ bun --version
 make setup
 ```
 
-Make also adds `/home/linuxbrew/.linuxbrew/bin` and `$HOME/.bun/bin` to its
-command path, so it works from noninteractive shells and VS Code tasks.
-Override `HOMEBREW_PREFIX` or `BUN_INSTALL` if your global installations use
-other locations. For example, a macOS Homebrew installation can use
-`make setup HOMEBREW_PREFIX="$(brew --prefix)"` with a global Bun installation.
+Make inherits `PATH`; the tool-path additions in `Makefile` are commented out.
+Configure `PATH` in noninteractive shells and VS Code tasks, or override `GO`,
+`GOFMT`, and `BUN` with executable paths.
 
 Setup checks the global Go and Bun versions and installs frontend dependencies
 with `bun install --frozen-lockfile`. The required Go version comes from
@@ -43,15 +41,20 @@ Frontend commands and the development process runner use Bun's runtime through
 | --- | --- |
 | `make setup` | Check global Go/Bun versions and install locked dependencies |
 | `make dev` | Run API + Vite together; stop both on Ctrl+C or if either exits |
-| `make dev-go` | Compile the development binary and run API port 8080 |
+| `make dev-go` | Compile with `dev`; run API port 8080 with repository `.local/streamline` settings |
 | `make dev-web` | Run Vite on localhost:5173 with hot reload |
 | `make build` | Build frontend, then embed it into `bin/streamline` |
 | `make run` | Build and start the standalone binary |
-| `make check` | Svelte/TypeScript diagnostics, Go vet, formatting check |
+| `make check` | Svelte/TypeScript diagnostics, frontend tests, Go tests/vet with `dev`, formatting check |
 
 Use `PORT=8081` with Make commands to change the API port; the Vite proxy uses
 the same value. Keep `PORT` nonzero during development. The standalone binary
 also accepts `-port 0` to choose a free port and prints its URL.
+
+Saved configurations use `~/.config/streamline` in production. `make dev-go` passes
+`-config-dir "$(CURDIR)/.local/streamline"`; this directory is ignored by Git.
+Use `-config-dir /path/to/settings` for alternate or isolated test roots.
+See [saved configurations](saved-configurations.md#persistence-contract).
 
 ```mermaid
 flowchart LR
@@ -106,13 +109,14 @@ application dependencies.
 ## Outputs and dependency commands
 
 - `.cache/`: Go caches and the development binary.
+- `.local/streamline/configs/`: development saved configuration JSON files.
 - `node_modules/` and `web/node_modules/`: frontend dependencies.
 - `internal/webassets/dist/`: generated frontend, including source maps.
 - `bin/streamline`: standalone executable.
 
-These directories are ignored by Git. Runtime session data is not written to
-them: stdin source bytes, parsed records, raw chunks, and query indexes are
-process-memory only and disappear when Streamline exits.
+These directories are ignored by Git. Saved configurations persist separately
+from captured-session data: stdin source bytes, parsed records, raw chunks, and
+query indexes are process-memory only and disappear when Streamline exits.
 
 Bun uses its global download cache (normally `~/.bun/install/cache`). Existing
 `.tools/` and `.cache/pnpm-store/` directories from the previous setup are no
@@ -137,6 +141,14 @@ view, and health endpoint through Vite.
 Stop development, run `make build`, and launch `bin/streamline` from another
 working directory to check that assets are embedded. Verify unknown API paths
 return 404 and Ctrl+C releases both development ports.
+
+Verify saved-entry capture/edit/clone, Load without execution, and Run with
+inherited columns/filters/search. Browser tests create temporary configuration
+roots and exercise restart persistence:
+
+```sh
+bun run --bun --filter @streamline/web test:e2e configurations.spec.ts commands.spec.ts
+```
 
 See [Bun package management](https://bun.com/docs/pm/cli/install),
 [Vite configuration](https://vite.dev/config/server-options.html) and

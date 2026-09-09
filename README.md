@@ -49,9 +49,10 @@ from `bun.lock`. Bun runs the frontend tooling. The built binary runs on its own
 - [Architecture and extension diagrams](.memory/architecture.md)
 - [Frontend visual output and virtualization](.memory/frontend.md)
 - [Development, commands, and debugging](.memory/development.md)
+- [Saved configuration implementation](.memory/saved-configurations.md)
 
 The frontend shell, stdin and command ingestion, parser, parsed/raw transport, in-memory
-query service, health endpoint, and build tooling are implemented.
+query service, saved configurations, health endpoint, and build tooling are implemented.
 
 
 ## Search logs
@@ -67,7 +68,7 @@ the same entry. Applying an empty search clears it.
 have an error bullet with details on hover or keyboard focus. Browser syntax
 validation runs immediately; Go validates again on Apply and can reject JS-only
 features such as lookaround and backreferences. Previous results stay visible
-if a search is rejected. Raw-output search and saved searches are not included.
+if a search is rejected. Raw-output search is not included. Search can be stored in a saved configuration.
 
 ### Field filters
 
@@ -149,8 +150,8 @@ and stopped output stays available until **Close and discard** or binary shutdow
 **Auto** uses the same log detection as stdin: JSON and timestamped logs stream
 progressively, while unrecognized plain output appears when the command finishes
 or is stopped. **Text** displays each sanitized, nonempty line immediately,
-without interpreting JSON or timestamps. Command tabs default to normalized
-`timestamp`, `severity`, and `message` columns. Switching tabs retains applied
+without interpreting JSON or timestamps. Command tabs without inherited settings
+default to normalized `timestamp`, `severity`, and `message` columns. Switching tabs retains applied
 search, filters, columns, follow preference, and the selected result position.
 
 Commands run through `/bin/sh -c` with the binary's working directory and
@@ -178,7 +179,8 @@ termination of deliberately detached processes or remote jobs.
 
 All sources are in memory. Browser reload discovers existing runs without
 restarting them; restarting the binary discards them. There are no command CLI
-flags, automatic restarts, saved commands, or Windows command support.
+flags, automatic restarts, or Windows command support. Named commands and viewer
+settings can be saved explicitly as described below.
 
 The source API is documented in [.memory/transport.md](.memory/transport.md).
 Run `make build` before the command browser tests:
@@ -188,3 +190,65 @@ bun run --bun --filter @streamline/web test:e2e commands.spec.ts
 ```
 
 These tests launch their own standalone binaries.
+
+
+## Saved configurations
+
+Click the **settings icon** at the right of the top bar to open **Saved configurations**.
+**Save current as new** captures the active tab’s actual command/output mode and
+applied columns, date formats, field filters, and general search. Unrun command
+text and unapplied editor drafts are excluded. Stdin entries have an empty command.
+
+Give the entry a name and use the three textareas to edit its command, column JSON,
+and filters/search JSON. **Save** writes the entry without changing the current tab.
+**Edit** updates an entry; **Clone and edit** starts an independent unsaved copy.
+Unsaved changes must be saved or discarded before leaving the editor.
+
+**Load** replaces the active tab’s columns, filters, and search and fills the command
+editor and output mode. It does not start, stop, or rename a running source. Click
+**Run** to execute the prepared command in a new tab with those settings. **Run again**
+uses the selected source’s original command/mode with its current applied settings.
+An untouched stdin tab retains the normal command column defaults on its first Run.
+Raw output retains prepared settings for reuse without filtering the raw text.
+
+Settings live on the machine running the Go binary, in:
+
+- Production: `~/.config/streamline/configs/`.
+- Development: `.local/streamline/configs/` in the repository, ignored by Git.
+- Override: `streamline -config-dir /path/to/settings` (files go in its `configs/` subdirectory).
+
+Each entry is a self-contained UTF-8 JSON file. Copy files between configuration
+folders to transfer entries; use **Refresh** or reopen settings to discover external
+changes. A safe filename such as `errors.json` is supported; names shown in the UI
+are independent of filenames and need not be unique. Malformed or unsupported files
+are listed with errors and left unchanged so they can be repaired outside the app.
+Files are limited to 64 KiB, including formatting, and writes replace files atomically.
+New directories/files are private (`0700`/`0600`).
+
+```json
+{
+  "version": 1,
+  "name": "Service errors",
+  "command": "journalctl -f -o json --no-pager",
+  "mode": "auto",
+  "columns": [
+    { "path": "timestamp", "dateFormat": "iso" },
+    { "path": "message", "dateFormat": "original" }
+  ],
+  "filters": {
+    "filter": [{ "field": "PRIORITY", "op": "eq", "value": "3" }],
+    "search": { "text": "timeout\nrefused", "mode": "plain", "operator": "or" }
+  }
+}
+```
+
+Column date formats are `original`, `iso`, `local`, `date`, and `time`.
+The Filters and search textarea edits the entire `filters` object shown above;
+the existing sidebar filter importer continues to accept just a filter array.
+Browser regex checks in settings are advisory because browser and Go syntax differ.
+Save and Load require authoritative Go validation, with filter positions and search
+line numbers in errors. Commands are stored as text and are not shell-validated.
+
+Saved entries survive browser reloads and binary restarts. Logs, tabs, scroll positions,
+panel sizes, follow state, and row heights remain session state. Commands are not
+recorded automatically; there is no automatic command history or tab restoration.

@@ -150,3 +150,9 @@ func anyScalar(value any, match func(string) bool) bool {
 	}
 	return false
 }
+
+// ValidateSearch checks query search syntax without allocating a query or scanning logs.
+func ValidateSearch(spec *SearchSpec) error {
+	_, err := compileSearch(spec)
+	return err
+}

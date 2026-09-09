@@ -8,9 +8,15 @@ The parser, query protocol, and normalized row model are unchanged.
 
 The left sidebar owns a session-only draft of newline-separated JSON paths.
 `SourceViewer.svelte` owns applied column configurations. Stdin defaults to
-`timestamp`, `level`, `msg`; commands use `timestamp`, `severity`, `message`.
-`App.svelte` retains these configurations between source switches. Editing does not affect the table until Apply sends a non-empty, trimmed
-list to the app; blank lines are ignored while order and duplicates are retained.
+`timestamp`, `level`, `msg`; commands without inherited settings use `timestamp`,
+`severity`, `message`. `App.svelte` retains applied configurations between source
+switches. Editing does not affect the table until Apply sends a non-empty, trimmed
+list to the viewer; blank lines are ignored while order and duplicates are retained.
+
+[Saved configurations](saved-configurations.md) persist the ordered
+`{path, dateFormat}[]` array. Loading commits columns after query replacement and
+resets the sidebar draft even when paths are unchanged. Run inherits explicitly
+prepared columns; unapplied sidebar drafts are excluded.
 
 VirtualLogTable receives the applied paths as a presentation prop. For each
 loaded row, `resolveRowColumnValue` reads normalized timestamp/severity/message

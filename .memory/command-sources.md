@@ -14,7 +14,7 @@ Implemented: concurrent command tabs plus permanent stdin. Linux/macOS only;
 | [stdin.go](../internal/ingest/stdin.go) | `Capture` flushes batches; `Completion.Publish` commits terminal state |
 | [sources.go](../internal/httpapi/sources.go) | Source JSON/SSE routes, scoped query dispatch, Host/Origin/header checks |
 | [App.svelte](../web/src/App.svelte) | Command form, selected source, descriptors, preference map, shared keyboard registry |
-| [SourceViewer.svelte](../web/src/lib/components/SourceViewer.svelte) | One mounted viewer: controller, queries/cache, panels, row selection, preference restoration |
+| [SourceViewer.svelte](../web/src/lib/components/SourceViewer.svelte) | One mounted viewer: controller, queries/cache, panels, row selection, preference restoration, live snapshot/application |
 | [sources.ts](../web/src/lib/transport/sources.ts) | `HTTPSourceAPI`, `SourcePreferences`; wire descriptors are `LogSource` in `types.ts` |
 
 ## Data flow
@@ -55,8 +55,10 @@ See [transport contracts](transport.md#independent-command-sources) for endpoint
 | In-memory retention | Parser buffers and query data can grow. Batch/page limits do not cap total capture memory; persistence/eviction need explicit ownership rules. |
 
 Text mode does not expose structured fields or normalized timestamps/severity.
-Command columns default to `timestamp`, `severity`, `message`; stdin keeps its
-existing defaults. SSH needs preconfigured authentication; use `-tt` if a remote
+Command columns default to `timestamp`, `severity`, `message` when no explicit
+settings are inherited. Stdin keeps its existing defaults. Run from a configured
+source inherits applied columns, filters, and search; see
+[saved configurations](saved-configurations.md#state-transitions). SSH needs preconfigured authentication; use `-tt` if a remote
 PTY is required without a local tty. Commands are never rewritten automatically.
 
 ## Completion and cleanup
@@ -104,7 +106,8 @@ sequenceDiagram
 - `OpenStdin` duplicates the descriptor and enables Go polling. Closing ordinary
   blocking `os.Stdin` can otherwise hang shutdown while the producer is still open.
 - Group cleanup does not guarantee termination of deliberately detached or remote
-  processes. Windows, auto-restart, persistence, and command CLI flags are absent.
+  processes. Windows, auto-restart, captured-session persistence, and command CLI
+  flags are absent. Named command/viewer configurations have separate file persistence.
 
 ## Viewer switching and notifications
 
@@ -112,11 +115,18 @@ sequenceDiagram
    and disposes its controller, queries, requests, subscriptions, and page cache.
 2. The new viewer uses its source URL and `start(savedSpec)`. Save only applied
    filter/search/sort, columns/date formats, row-line setting, follow state, and
-   logical result offset. Do not retain old pages/snapshot tokens in preferences.
+   logical result offset. Preferences also retain the stdin `inheritOnRun` flag.
+   Do not retain old pages/snapshot tokens in preferences.
 3. After the first query and navigator exist, restore a paused row via `navigate`
    and `pause`. Seed search/filter editors from saved values before pages arrive.
 4. Removing the selected source in any browser selects stdin. Reload discovers
    retained sources, initially selects stdin, and resets browser-only preferences.
+   Saved configuration files persist and require explicit Load.
+
+`SourceViewer.snapshot()` also exposes current applied preferences without a tab
+switch. Run captures them before source creation and seeds the new tab before
+selection. New runs reset follow/row-position/row-height state. Run again uses the
+selected source's original command/mode; Load only prepares the command editor.
 
 One source-list EventSource remains open; only the active viewer owns query SSE
 (two query streams may overlap during filter replacement). Source notifications
