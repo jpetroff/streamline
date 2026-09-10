@@ -62,6 +62,21 @@ make build GOOS=darwin GOARCH=arm64  # bin/streamline.darwin.arm64.tar.gz (macOS
 Archives for different targets have distinct filenames. Each build replaces
 `bin/streamline` with the selected target's executable.
 
+### Binary version
+
+`./bin/streamline -v` prints the package version, UTC build date and time, and Git
+commit hash, then exits. Both `make build` and `make dev-go` embed this metadata.
+Builds without a Git checkout report `unknown` for the commit hash; direct
+`go build` commands without the Make linker flags report `dev` with unknown build
+time and commit.
+
+The package version is stored in `VERSION`, initially `0.1.0`. Edit it manually,
+or run `make version-bump` to increment the minor number and reset the patch to
+zero (for example, `0.1.0` becomes `0.2.0`). Commit the updated `VERSION` file and
+rebuild to include the new version in the binary. Building does not bump it.
+
+### Installation
+
 Publish the archive, replace the default `TARBALL_URL` in `scripts/install.sh`
 with its URL, and host the installer. Users can then run:
 

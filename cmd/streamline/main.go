@@ -20,10 +20,22 @@ import (
 	"streamline/internal/webassets"
 )
 
+// Populated by Make using Go linker flags; direct Go builds use these defaults.
+var (
+	version    = "dev"
+	buildTime  = "unknown"
+	commitHash = "unknown"
+)
+
 func main() {
+	showVersion := flag.Bool("v", false, "print build version and exit")
 	port := flag.Int("port", 8080, "localhost port (0 selects an available port)")
 	configDir := flag.String("config-dir", "", "directory for saved configurations")
 	flag.Parse()
+	if *showVersion {
+		fmt.Printf("streamline %s (built %s, commit %s)\n", version, buildTime, commitHash)
+		return
+	}
 	if *port < 0 || *port > 65535 {
 		slog.Error("port must be between 0 and 65535")
 		os.Exit(2)
