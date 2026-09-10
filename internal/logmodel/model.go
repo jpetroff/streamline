@@ -7,10 +7,14 @@ import "encoding/json"
 type SourceFormat string
 
 const (
-	FormatJournaldJSON SourceFormat = "journald-json"
-	FormatJSON         SourceFormat = "json"
-	FormatLogfmt       SourceFormat = "logfmt"
-	FormatText         SourceFormat = "text"
+	FormatJournaldJSON  SourceFormat = "journald-json"
+	FormatJSON          SourceFormat = "json"
+	FormatLogfmt        SourceFormat = "logfmt"
+	FormatSyslogRFC5424 SourceFormat = "syslog-rfc5424"
+	FormatSyslogRFC3164 SourceFormat = "syslog-rfc3164"
+	FormatSyslogText    SourceFormat = "syslog-text"
+	FormatHTTPAccess    SourceFormat = "http-access"
+	FormatText          SourceFormat = "text"
 )
 
 // Diagnostic describes a non-fatal normalization or data-quality issue.

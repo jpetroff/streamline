@@ -11,7 +11,7 @@
 | `internal/logmodel` | Universal typed log records, source formats, parser diagnostics, and deep cloning |
 | `internal/source` | Independent stdin/command captures, process groups, lifecycle, source registry |
 | `internal/ingest` | Reader capture, commit batching, deferred terminal publication |
-| `internal/parse` | Streaming framing, terminal sanitization, stream classification, and journald/JSON/logfmt/text normalization |
+| `internal/parse` | Streaming framing, terminal sanitization, stream classification, and journald/JSON/logfmt/syslog/HTTP access/text normalization |
 | `internal/webassets` | Embedded frontend in release builds; development build excludes assets |
 | `web` | Svelte 5 viewer controller, HTTP/SSE client, 32 MB page cache, dark application shell, and segmented virtual log table |
 | UI foundations | shadcn-svelte configuration, Bits UI, dark neutral theme, class utility, and Lucide icons |
@@ -94,7 +94,7 @@ flowchart LR
   API --> UI["Svelte table or raw panel"]
 ```
 
-- A valid journald JSON object, generic JSON object, complete logfmt line, or timestamped text line
+- A valid journald JSON object, generic JSON object, complete logfmt line, syslog record, HTTP access record, or timestamped text line
   permanently selects parsed mode. Earlier unrecognized lines are emitted as
   text records; later lines remain records even when individually unrecognized.
 - Until recognition, complete frames are buffered. If recognition never occurs,
@@ -123,7 +123,13 @@ Replay profiles and persistent log storage remain future work.
 
 The [parser specification](parser.md) separates source configuration from
 record interpretation, stream classification, and terminal status publication.
-These decisions have different owners and lifetimes.
+These decisions have different owners and lifetimes. Detection consumes sanitized
+line contents, not filenames, extensions, or command names. A source can alternate
+between JSON, syslog, access records, and fallback text without changing its mode.
+
+For a practical entry point, see the [parser overview](parser.md#start-here),
+[detection examples](parser.md#detection-examples), and
+[troubleshooting guide](parser.md#troubleshooting-detection).
 
 ```mermaid
 flowchart LR
@@ -145,7 +151,14 @@ flowchart LR
 
 Text mode bypasses per-frame format selection and initializes recognition to
 true. Auto uses explicit precedence: JSON-shaped input (journald specialization
-before generic JSON), complete logfmt, timestamped text, and text fallback.
+before generic JSON), complete logfmt, syslog, HTTP access, timestamped text,
+and text fallback.
+A parser candidate can match its initial shape and then fail decoding; that
+failure stops selection for the line and returns text with diagnostics. Only a
+non-candidate proceeds to the next parser. Successful structural recognition can
+survive normalization issues such as an invalid date. See
+[candidate versus recognition](parser.md#candidate-selection-versus-log-recognition).
+
 The same source can contain several `SourceFormat` values. A text record is not
 evidence of configured Text mode, and `raw` is a result variant rather than a
 parser choice.

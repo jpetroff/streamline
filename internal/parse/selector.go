@@ -54,7 +54,22 @@ func selectParser(input string, context parseContext, diagnostics []logmodel.Dia
 		return parseDecision{Record: normalizeLogfmt(fields, context, diagnostics), IdentifiesLogs: true}
 	}
 
-	// 3. Timestamped text recognizes logs; 4. other text remains a fallback.
+	// 3. Recognize syslog envelopes and exact Common/Combined access layouts.
+	// Candidate failures retain the whole line as text.
+	if decision, candidate := parseSyslog(input, context, diagnostics); candidate {
+		return decision
+	}
+	if decision, candidate := parseHTTPAccess(input, diagnostics); candidate {
+		return decision
+	}
+
+	// 4. Timestamped text recognizes logs; other text remains a fallback.
 	record := normalizeText(input, context, diagnostics)
 	return parseDecision{Record: record, IdentifiesLogs: record.Timestamp != ""}
+}
+
+// malformedFormat discards partial fields and does not identify a stream as logs.
+func malformedFormat(input string, diagnostics []logmodel.Diagnostic, code, detail string) parseDecision {
+	addDiagnostic(&diagnostics, code, detail+"; the complete line was retained as text")
+	return parseDecision{Record: plainText(input, diagnostics)}
 }

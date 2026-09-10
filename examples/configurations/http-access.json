@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "name": "HTTP access: server errors",
+  "command": "tail -n 200 -F /var/log/nginx/access.log",
+  "mode": "auto",
+  "columns": [
+    {
+      "path": "timestamp",
+      "dateFormat": "iso"
+    },
+    {
+      "path": "client",
+      "dateFormat": "original"
+    },
+    {
+      "path": "method",
+      "dateFormat": "original"
+    },
+    {
+      "path": "target",
+      "dateFormat": "original"
+    },
+    {
+      "path": "status",
+      "dateFormat": "original"
+    },
+    {
+      "path": "bytes",
+      "dateFormat": "original"
+    },
+    {
+      "path": "referer",
+      "dateFormat": "original"
+    },
+    {
+      "path": "user_agent",
+      "dateFormat": "original"
+    }
+  ],
+  "filters": {
+    "filter": [
+      {
+        "field": "status",
+        "op": "gte",
+        "value": 500
+      },
+      {
+        "field": "status",
+        "op": "lt",
+        "value": 600
+      }
+    ],
+    "search": {
+      "text": "",
+      "mode": "plain",
+      "operator": "or"
+    }
+  }
+}

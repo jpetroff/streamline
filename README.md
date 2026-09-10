@@ -21,7 +21,7 @@ make dev
 ```
 
 Open [localhost:5173](http://localhost:5173). Development starts in “Waiting
-for stdin…” and accepts terminal input until EOF. Recognized JSON, logfmt, or timestamped
+for stdin…” and accepts terminal input until EOF. Recognized JSON, logfmt, syslog, HTTP access, or timestamped
 logs appear progressively; otherwise EOF switches to a raw text view. The health
 endpoint is [localhost:5173/api/v1/health](http://localhost:5173/api/v1/health).
 Press Ctrl+C to stop both processes.
@@ -190,7 +190,7 @@ Commands keep running when you switch tabs or disconnect the browser. Finished
 and stopped output stays available until **Close and discard** or binary shutdown.
 **Run again** starts a new tab and preserves the earlier run.
 
-**Auto** uses the same log detection as stdin: JSON, logfmt, and timestamped logs stream
+**Auto** uses the same log detection as stdin: JSON, logfmt, syslog, HTTP access, and timestamped logs stream
 progressively, while unrecognized plain output appears when the command finishes
 or is stopped. **Text** displays each sanitized, nonempty line immediately,
 without interpreting JSON or timestamps. Command tabs without inherited settings
@@ -231,6 +231,24 @@ It provides normalized timestamp, severity, and message columns while retaining
 all source values as strings. Complete key/value lines such as `status=403` also
 count as logs; use string filters for their fields. See the
 [parser selection and extension guide](.memory/parser.md#parser-selection-and-extension).
+
+### Syslog and HTTP access logs
+
+Auto also recognizes RFC 5424 version 1, traditional RFC 3164, local syslog
+with a hostname/application tag, and standard Common/Combined HTTP access logs.
+Syslog exposes `hostname`, `app`, `procid`, and numeric priority/facility fields
+when present. HTTP access exposes `client`, `method`, `target`, numeric `status`
+and `bytes`, plus `referer` and `user_agent` for Combined logs.
+
+For example, filter `app` equal to `sshd`, or filter `status` greater than or
+equal to `500` and less than `600`. HTTP status does not create log severity.
+Legacy syslog dates assume UTC and a year near source startup; old archives or
+logs from another timezone may need a source with explicit timestamp context.
+Custom access layouts stay as text, and malformed candidates retain their full
+line with diagnostics in an otherwise parsed stream.
+
+See [sample logs, saved configurations, and field reference](examples/README.md)
+for runnable examples of all four formats and commands for local/SSH sources.
 
 The source API is documented in [.memory/transport.md](.memory/transport.md).
 Run `make build` before the command browser tests:

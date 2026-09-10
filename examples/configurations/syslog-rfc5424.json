@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "name": "Syslog: SSH events (RFC 5424)",
+  "command": "tail -n 200 -F /var/log/remote.log",
+  "mode": "auto",
+  "columns": [
+    {
+      "path": "timestamp",
+      "dateFormat": "iso"
+    },
+    {
+      "path": "severity",
+      "dateFormat": "original"
+    },
+    {
+      "path": "hostname",
+      "dateFormat": "original"
+    },
+    {
+      "path": "app",
+      "dateFormat": "original"
+    },
+    {
+      "path": "procid",
+      "dateFormat": "original"
+    },
+    {
+      "path": "facility",
+      "dateFormat": "original"
+    },
+    {
+      "path": "message",
+      "dateFormat": "original"
+    }
+  ],
+  "filters": {
+    "filter": [
+      {
+        "field": "app",
+        "op": "eq",
+        "value": "sshd"
+      }
+    ],
+    "search": {
+      "text": "",
+      "mode": "plain",
+      "operator": "or"
+    }
+  }
+}

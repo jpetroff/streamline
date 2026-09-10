@@ -49,7 +49,7 @@ See [transport contracts](transport.md#independent-command-sources) for endpoint
 | Shell text passed unchanged to `/bin/sh -c` | Quotes, pipes, redirects, and expansion use POSIX shell rules; inherit binary cwd/environment. `shellPath` is a private startup-test seam. |
 | New OS session via `Setsid`; null stdin | Isolates command input from app stdin and enables group signals. PTY/input forwarding requires a separate transport and terminal lifecycle. |
 | One pipe for stdout and stderr | Preserve received bytes; stream identity and independent buffering order are unavailable. Close the parent's writer immediately after Start. |
-| Auto is the default | JSON objects, complete logfmt, or timestamped text establish parsed output. Unrecognized output is buffered until recognition or terminal raw fallback. Text bypasses recognition and emits sanitized retained frames. |
+| Auto is the default | JSON objects, complete logfmt, syslog, HTTP access, or timestamped text establish parsed output. Unrecognized output is buffered until recognition or terminal raw fallback. Text bypasses recognition and emits sanitized retained frames. |
 | Capture and terminal publication are separate | Pipe EOF alone is insufficient: process exit may still fail. Flush final records/partial lines before `finish` publishes status. |
 | Browser lifetime does not own capture | Switching, reload, query expiry, and disconnect never stop a process. Run again creates another retained source. |
 | In-memory retention | Parser buffers and query data can grow. Batch/page limits do not cap total capture memory; persistence/eviction need explicit ownership rules. |
@@ -146,6 +146,13 @@ responses. Preserve these boundaries when adding sources or reconnect behavior.
 
 ## Debugging and verification
 
+Stdin and command captures share content-based parser detection. Source commands
+and file extensions do not select formats. Consult the
+[parser detection examples](parser.md#detection-examples) and
+[parser troubleshooting table](parser.md#troubleshooting-detection) when output
+is raw, fields are missing, or prefixes prevent structured decoding. Loading a
+saved output mode prepares a new run; it does not reparse existing source rows.
+
 | Symptom | Inspect first |
 | --- | --- |
 | Running command, no visible output | Auto detection vs Text, child buffering, final newline, SSH authentication; then pipe writer ownership |
@@ -171,6 +178,7 @@ bun run --bun --filter @streamline/web test:e2e commands.spec.ts
   cross-client deletion, and preference restoration. Build the binary first.
 - Implementation verification passed on Linux, including race checks. macOS
   cross-compilation passed; native process cleanup remains unverified.
-- Known baseline: optional `TestSuppliedReferenceDatasetsWhenAvailable` failed on
-  the local terminal dataset before this feature. Compare baseline/fixture before
-  attributing that `make check` failure to command ingestion; do not silently skip it.
+- The optional terminal-dataset test checks raw fallback and safe display. It
+  does not require standalone pager frames in every local capture; deterministic
+  parser tests verify skipped-pager diagnostics. The former assertion was
+  confirmed to fail with the baseline selector before being corrected.

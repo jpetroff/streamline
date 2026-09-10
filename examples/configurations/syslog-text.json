@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "name": "Syslog: local SSH events",
+  "command": "tail -n 200 -F /var/log/auth.log",
+  "mode": "auto",
+  "columns": [
+    {
+      "path": "timestamp",
+      "dateFormat": "iso"
+    },
+    {
+      "path": "hostname",
+      "dateFormat": "original"
+    },
+    {
+      "path": "app",
+      "dateFormat": "original"
+    },
+    {
+      "path": "procid",
+      "dateFormat": "original"
+    },
+    {
+      "path": "message",
+      "dateFormat": "original"
+    }
+  ],
+  "filters": {
+    "filter": [
+      {
+        "field": "app",
+        "op": "eq",
+        "value": "sshd"
+      }
+    ],
+    "search": {
+      "text": "",
+      "mode": "plain",
+      "operator": "or"
+    }
+  }
+}

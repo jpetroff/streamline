@@ -77,7 +77,7 @@ type frame struct {
 	end        int
 }
 
-// NewEngine builds an engine with built-in journald JSON, JSON, logfmt, and text parsers.
+// NewEngine builds an engine with structured, syslog, HTTP access, and text parsers.
 func NewEngine(options Options) *Engine {
 	return &Engine{options: options}
 }

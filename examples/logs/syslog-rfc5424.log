@@ -1,0 +1,2 @@
+<35>1 2026-09-10T12:00:00Z home sshd 42 AUTH [origin ip="192.0.2.10"] Failed password for invalid user guest
+<30>1 2026-09-10T12:00:01Z home cron 43 JOB - job completed
