@@ -35,7 +35,7 @@ async function settings(page: Page) {
   await expect(dialog).toBeVisible(); return dialog;
 }
 async function run(page: Page, text = command, mode = 'auto') {
-  await page.getByLabel('Input source', { exact: true }).selectOption('command');
+  await page.getByRole('button', { name: 'New command tab', exact: true }).click();
   await page.getByLabel('Command', { exact: true }).fill(text);
   await page.getByLabel('Output mode').selectOption(mode);
   await page.getByRole('button', { name: 'Run', exact: true }).click();
@@ -91,9 +91,9 @@ test('captures applied active settings, edits and clones, persists through resta
   dialog = await settings(page);
   await dialog.getByRole('article', { name: 'Saved errors', exact: true }).getByRole('button', { name: 'Load', exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByRole('navigation', { name: 'Log sources' }).getByRole('button')).toHaveCount(1);
+  await expect(page.getByRole('tablist', { name: 'Log sources' }).getByRole('tab')).toHaveCount(2);
   await expect(page.getByLabel('Command', { exact: true })).toHaveValue(command);
-  await expect(page.getByLabel('Column paths', { exact: true })).toHaveValue('timestamp\nmessage');
+  await expect(page.getByRole('table')).toHaveCount(0);
   await page.getByRole('button', { name: 'Run', exact: true }).click();
   await expect(page.getByRole('cell', { name: 'timeout', exact: true })).toBeVisible();
   await expect(page.getByRole('cell', { name: 'healthy', exact: true })).toHaveCount(0);
@@ -160,14 +160,14 @@ test('copies text files between directories and retains loaded settings through 
   await dialog.getByRole('article', { name: 'Errors' }).getByRole('button', { name: 'Load', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByLabel('Raw command output')).toContainText('raw-output');
-  await page.getByRole('navigation', { name: 'Log sources' }).getByRole('button', { name: 'stdin', exact: true }).click();
+  await page.getByRole('tablist', { name: 'Log sources' }).getByRole('tab', { name: 'stdin', exact: true }).click();
   dialog = await settings(page);
   await dialog.getByRole('button', { name: 'Save current as new' }).click();
   await expect(dialog.getByLabel('Command', { exact: true })).toHaveValue('');
   expect(JSON.parse(await dialog.getByLabel('Filters and search (JSON)').inputValue()).filter).toEqual([]);
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
   await dialog.getByRole('button', { name: 'Discard changes' }).click();
-  await page.getByRole('navigation', { name: 'Log sources' }).getByRole('button', { name: /raw-output/ }).click();
+  await page.getByRole('tablist', { name: 'Log sources' }).getByRole('tab', { name: /raw-output/ }).click();
   await page.getByRole('button', { name: 'Run', exact: true }).click();
   await expect(page.getByRole('cell', { name: 'timeout', exact: true })).toBeVisible();
   await expect(page.getByRole('cell', { name: 'healthy', exact: true })).toHaveCount(0);
@@ -191,9 +191,45 @@ test('source removal while a load is in flight cannot apply settings to stdin', 
   await received;
   const removed = await request.delete(`${apiURL}/api/v1/sources/${id}`, { headers: { 'Content-Type': 'application/json', 'X-Streamline-Request': '1' }, data: {} });
   expect(removed.status()).toBe(204);
-  await expect(page.getByRole('navigation', { name: 'Log sources', includeHidden: true }).getByRole('button', { name: 'stdin', exact: true, includeHidden: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('tablist', { name: 'Log sources', includeHidden: true }).getByRole('tab', { name: 'stdin', exact: true, includeHidden: true })).toHaveAttribute('aria-selected', 'true');
   release();
   await expect(dialog.getByRole('alert')).toContainText('The active tab changed.');
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page.getByLabel('Column paths', { exact: true })).toHaveValue('timestamp\nlevel\nmsg');
+});
+
+test('a blank tab can load and save prepared settings before its first run', async ({ page, request }) => {
+  await putFile(); await page.goto(apiURL);
+  await page.getByRole('button', { name: 'New command tab', exact: true }).click();
+  const tabId = await page.getByRole('tab', { selected: true }).getAttribute('id');
+  let dialog = await settings(page);
+  await dialog.getByRole('article', { name: 'Errors' }).getByRole('button', { name: 'Load', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByLabel('Command', { exact: true })).toHaveValue(command);
+  expect(await request.get(`${apiURL}/api/v1/sources`).then(r => r.json())).toHaveLength(1);
+  dialog = await settings(page);
+  await dialog.getByRole('button', { name: 'Save current as new' }).click();
+  await expect(dialog.getByLabel('Command', { exact: true })).toHaveValue(command);
+  expect(JSON.parse(await dialog.getByLabel('Filters and search (JSON)').inputValue())).toEqual(bundle().filters);
+  await dialog.getByLabel('Name', { exact: true }).fill('Prepared');
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(dialog.getByRole('status')).toHaveText('Configuration saved.');
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('tab', { name: 'stdin', exact: true }).click();
+  await page.locator(`#${tabId}`).click();
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await expect(page.getByRole('cell', { name: 'timeout', exact: true })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'healthy', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('tab', { selected: true })).toHaveAttribute('id', tabId!);
+});
+
+test('loading a commandless configuration keeps stdin selected', async ({ page, request }) => {
+  await putFile({ ...bundle(), command: '' }); await page.goto(apiURL);
+  const dialog = await settings(page);
+  await dialog.getByRole('article', { name: 'Errors' }).getByRole('button', { name: 'Load', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('tab')).toHaveCount(1);
+  await expect(page.getByRole('tab', { name: 'stdin', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByLabel('Column paths', { exact: true })).toHaveValue('timestamp\nmessage');
+  expect(await request.get(`${apiURL}/api/v1/sources`).then(r => r.json())).toHaveLength(1);
 });

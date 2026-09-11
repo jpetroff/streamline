@@ -11,7 +11,7 @@ binary. Source data and browser session preferences remain in memory.
 | [configurations.go](../internal/httpapi/configurations.go) | List/get/create/update/validate routes; injected through `NewConfiguredSourceHandler` |
 | [configurations.ts](../web/src/lib/configurations.ts) | TypeScript document/draft types, serialization, validation feedback, HTTP client |
 | [ConfigurationSettings.svelte](../web/src/lib/components/ConfigurationSettings.svelte) | Toolbar trigger, Bits UI dialog, entry list, editor, clone, dirty-state guards |
-| [SourceViewer.svelte](../web/src/lib/components/SourceViewer.svelte), [App.svelte](../web/src/App.svelte) | Live snapshots, configuration application, command preparation, new-tab preference seeding |
+| [SourceViewer.svelte](../web/src/lib/components/SourceViewer.svelte), [App.svelte](../web/src/App.svelte) | Live snapshots, configuration application, command preparation, per-tab preferences |
 | [viewer-controller.ts](../web/src/lib/transport/viewer-controller.ts) | `setQueryAndWait`: settle on displayed replacement, failure, supersession, or disposal |
 
 ## Persistence contract
@@ -42,8 +42,9 @@ binary. Source data and browser session preferences remain in memory.
 
 **Save current as new:** `snapshot()` copies applied columns/date formats and the
 retained applied query specification without unmounting. The selected source
-supplies command/mode; stdin supplies empty command/`auto`. Unsubmitted drafts and
-pending query specifications are excluded. Clone copies a persisted document into
+supplies command/mode; stdin supplies empty command/`auto`. Prepared tabs without
+sources supply their command/mode drafts and locally stored settings. Executed
+tabs exclude unsubmitted drafts and pending query specifications. Clone copies a persisted document into
 an unsaved draft with a new name; create assigns a new ID. Save changes only the file.
 
 ```mermaid
@@ -70,11 +71,15 @@ Loading never executes or changes the source process. Query failure preserves th
 previous display and columns. Tab changes/disposal reject stale completion. Editor
 revision keys reset drafts even when loaded values equal the existing applied values.
 
-**Run:** snapshot before source creation; seed the new tab before selection.
-Command tabs inherit applied settings. Stdin inherits only after explicit preparation
-(`inheritOnRun`); untouched stdin preserves normal command column defaults. New tabs
-start following, with no saved row offset and one row line. **Run again** uses the
-selected source's actual command/mode with its current applied settings.
+Blank command tabs retain validated configurations locally until their first Run.
+Loading a command configuration from stdin creates a prepared command tab without
+changing stdin; commandless configurations still apply to stdin.
+
+**Run:** snapshot applied settings, await deletion of the previous source, and
+attach the newly created source to the same UI tab. Preserve columns, filters,
+search, and row height; resume following with no row offset or old selection.
+**Run again** uses the selected source's actual command/mode and leaves drafts
+unchanged. A new tab opened with + starts with default settings.
 
 ## Validation and interaction
 

@@ -141,14 +141,14 @@ only contains the shadcn configuration, theme, utility, and dependencies.
 
 ## Smoke checks
 
-After `make check`, verify the stdin selector, waiting state, parsed table, raw
+After `make check`, verify the fixed stdin tab, +/close controls, source selector below the tabs, waiting state, parsed table, raw
 view, and health endpoint through Vite.
 Stop development, run `make build`, and launch `bin/streamline` from another
 working directory to check that assets are embedded. Verify unknown API paths
 return 404 and Ctrl+C releases both development ports.
 
 Verify saved-entry capture/edit/clone, Load without execution, and Run with
-inherited columns/filters/search. Browser tests create temporary configuration
+retained columns/filters/search in the same tab. Browser tests create temporary configuration
 roots and exercise restart persistence:
 
 ```sh

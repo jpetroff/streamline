@@ -51,7 +51,7 @@ See [transport contracts](transport.md#independent-command-sources) for endpoint
 | One pipe for stdout and stderr | Preserve received bytes; stream identity and independent buffering order are unavailable. Close the parent's writer immediately after Start. |
 | Auto is the default | JSON objects, complete logfmt, syslog, HTTP access, or timestamped text establish parsed output. Unrecognized output is buffered until recognition or terminal raw fallback. Text bypasses recognition and emits sanitized retained frames. |
 | Capture and terminal publication are separate | Pipe EOF alone is insufficient: process exit may still fail. Flush final records/partial lines before `finish` publishes status. |
-| Browser lifetime does not own capture | Switching, reload, query expiry, and disconnect never stop a process. Run again creates another retained source. |
+| Browser lifetime does not own capture | Switching, reload, query expiry, and disconnect never stop a process. Run again discards the old capture and creates a replacement in the same UI tab. |
 | In-memory retention | Parser buffers and query data can grow. Batch/page limits do not cap total capture memory; persistence/eviction need explicit ownership rules. |
 
 Configured source mode, per-record `SourceFormat`, query `InputKind`, and terminal
@@ -118,30 +118,38 @@ sequenceDiagram
 
 ## Viewer switching and notifications
 
-1. `App.select` changes the keyed source ID; old `SourceViewer` saves preferences
-   and disposes its controller, queries, requests, subscriptions, and page cache.
-2. The new viewer uses its source URL and `start(savedSpec)`. Save only applied
-   filter/search/sort, columns/date formats, row-line setting, follow state, and
-   logical result offset. Preferences also retain the stdin `inheritOnRun` flag.
-   Do not retain old pages/snapshot tokens in preferences.
-3. After the first query and navigator exist, restore a paused row via `navigate`
-   and `pause`. Seed search/filter editors from saved values before pages arrive.
-4. Removing the selected source in any browser selects stdin. Reload discovers
-   retained sources, initially selects stdin, and resets browser-only preferences.
-   Saved configuration files persist and require explicit Load.
+1. `TabController` owns stable UI tab IDs, source IDs, command/mode drafts,
+   applied preferences, pending operations, and errors. Stdin is fixed; + creates
+   a local blank command tab with default normalized columns.
+2. `App` keys `SourceViewer` by tab and source identity. Disposal saves preferences
+   only if the tab still owns that source, then releases queries, subscriptions,
+   requests, and pages. Preferences never retain old pages or snapshot tokens.
+3. Switching restores applied filters/search, columns/date formats, row height,
+   follow state, and the selected result offset. Draft commands remain per tab.
+4. Run snapshots applied settings, awaits DELETE (including process cleanup), and
+   POSTs the new command into the same UI tab. It clears position/selection and
+   follows new output while preserving row height and other applied settings.
+   Run again uses the last executed command/mode; editor drafts are unchanged.
+5. Mutations are serialized per tab. Failed deletion retains the source; failed
+   creation after deletion retains a prepared tab with its draft and error.
+   Unknown event sources are deferred during creates to avoid duplicate tabs
+   when SSE precedes HTTP. Completion never selects a different tab.
+6. Closing or external deletion selects the right neighbor, otherwise the left.
+   Blank tabs survive source-list updates. Reload selects stdin and discovers
+   backend runs; blank tabs, drafts, preferences, and UI ordering are not persisted.
+   A reload during delete-then-create can interrupt replacement between requests.
 
-`SourceViewer.snapshot()` also exposes current applied preferences without a tab
-switch. Run captures them before source creation and seeds the new tab before
-selection. New runs reset follow/row-position/row-height state. Run again uses the
-selected source's original command/mode; Load only prepares the command editor.
+Saved configurations remain separate persistent files. Load never executes:
+command configurations loaded from stdin open a prepared tab, while existing
+command tabs receive settings/drafts in place.
 
 One source-list EventSource remains open; only the active viewer owns query SSE
 (two query streams may overlap during filter replacement). Source notifications
 use a one-slot invalidation queue and send the full descriptor list on connection
 and changes. They do not use the query stream's 100 ms timer. Both streams use
 15-second heartbeats and five-second write deadlines; neither carries log rows.
-`sourceRevision` rejects stale initial lists; selection intent prevents a late Run
-response from overriding a newer selection; viewer guards reject stale row/query
+`TabController.revision` rejects stale initial lists; per-tab mutations never
+override the current selection; viewer guards reject stale row/query
 responses. Preserve these boundaries when adding sources or reconnect behavior.
 
 ## Debugging and verification

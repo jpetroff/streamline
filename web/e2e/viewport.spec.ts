@@ -26,13 +26,13 @@ async function expectPanelLayout(page: Page) {
     });
     return {
       panels, height: innerHeight,
-      appToolbar: rect('[aria-label="Application toolbar"]'),
+      sourceControls: rect('[aria-label="Source controls"]'),
       table: rect('[role="table"]'), toolbar: rect('[aria-label="Table toolbar"]'),
       search: rect('[aria-label="General search"]'), input: rect('#general-search'),
     };
   });
   for (const panel of layout.panels.filter(panel => !panel.hidden)) {
-    expect(panel.rect.top).toBe(layout.appToolbar.bottom);
+    expect(panel.rect.top).toBe(layout.sourceControls.bottom);
     expect(panel.rect.bottom).toBe(layout.height);
   }
   expect(layout.panels[0].background).toBe(layout.panels[1].background);

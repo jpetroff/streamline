@@ -199,11 +199,24 @@ programmatic commands, and `keyboard.label` / `keyboard.aria` for platform hints
 
 ## Command log sources
 
-On Linux and macOS, select **command**, enter a shell command, choose an output
-mode, and click **Run**. Each run opens an independent log tab alongside stdin.
-Commands keep running when you switch tabs or disconnect the browser. Finished
-and stopped output stays available until **Close and discard** or binary shutdown.
-**Run again** starts a new tab and preserves the earlier run.
+On Linux and macOS, click **+** in the tab bar to open a blank command tab. Enter a
+shell command, choose an output mode, and click **Run**. Each tab has its own editor
+and output; editing only changes the draft. **Run** stops and discards the previous
+capture before starting the edited command in the same tab. **Run again** repeats
+the last executed command and mode in that tab, leaving editor drafts intact.
+Both preserve applied viewer settings, clear the previous row position, and follow
+new output. New tabs start with default settings.
+
+Stdin is permanently first and cannot be closed or repurposed. Source selection
+sits below the tabs; file input remains disabled. Use each command tab’s **×** to
+stop its process and discard its output. Closing selects the right neighbor, or
+the left if there is none; closing a background tab leaves the active tab selected.
+**Stop** keeps captured output available. Commands keep running when you switch
+tabs or disconnect the browser. Wait for a pending Run to finish before reloading;
+a reload between discard and creation can interrupt the replacement.
+
+With a tab focused, use Left/Right, Home/End to select tabs and Delete to close a
+command tab. The tab strip scrolls horizontally when needed; **+** stays accessible.
 
 **Auto** uses the same log detection as stdin: JSON, logfmt, syslog, HTTP access, and timestamped logs stream
 progressively, while unrecognized plain output appears when the command finishes
@@ -280,7 +293,9 @@ These tests launch their own standalone binaries.
 Click the **settings icon** at the right of the top bar to open **Saved configurations**.
 **Save current as new** captures the active tab’s actual command/output mode and
 applied columns, date formats, field filters, and general search. Unrun command
-text and unapplied editor drafts are excluded. Stdin entries have an empty command.
+text and unapplied editor drafts are excluded for tabs that have run. A prepared
+tab that has not run saves its command draft and prepared settings. Stdin entries
+have an empty command.
 
 Give the entry a name and use the three textareas to edit its command, column JSON,
 and filters/search JSON. **Save** writes the entry without changing the current tab.
@@ -289,9 +304,11 @@ Unsaved changes must be saved or discarded before leaving the editor.
 
 **Load** replaces the active tab’s columns, filters, and search and fills the command
 editor and output mode. It does not start, stop, or rename a running source. Click
-**Run** to execute the prepared command in a new tab with those settings. **Run again**
+**Run** to replace the capture in the same tab with those settings. **Run again**
 uses the selected source’s original command/mode with its current applied settings.
-An untouched stdin tab retains the normal command column defaults on its first Run.
+Loading a command configuration from stdin opens a prepared command tab without
+executing it; commandless configurations still apply to stdin. Blank command tabs
+can also load configurations before their first Run.
 Raw output retains prepared settings for reuse without filtering the raw text.
 
 Settings live on the machine running the Go binary, in:

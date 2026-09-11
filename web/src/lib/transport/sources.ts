@@ -2,7 +2,7 @@ import { responseJSON, type EventConnection } from './api';
 import type { CommandRequest, LogSource, QuerySpec } from './types';
 import type { ColumnConfig } from '$lib/columns';
 
-/** Preferences belong to a source, while its query and page cache belong to a mounted viewer. */
+/** Preferences belong to a UI tab; its query and page cache belong to one mounted source viewer. */
 export interface SourcePreferences {
   spec: QuerySpec;
   columns: ColumnConfig[];
