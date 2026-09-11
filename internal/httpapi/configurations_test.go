@@ -13,7 +13,7 @@ import (
 	"streamline/internal/source"
 )
 
-const savedDocument = `{"version":1,"name":"Example","command":"echo hello","mode":"text","columns":[{"path":"message","dateFormat":"original"}],"filters":{"filter":[],"search":{"text":"","mode":"plain","operator":"or"}}}`
+const savedDocument = `{"version":1,"name":"Example","command":"echo hello","mode":"text","columns":[{"path":"message","dateFormat":"original","width":280.5}],"filters":{"filter":[],"search":{"text":"","mode":"plain","operator":"or"}}}`
 
 func TestConfigurationAPI(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "settings")
@@ -87,6 +87,22 @@ func TestConfigurationAPI(t *testing.T) {
 	if len(manager.List()) != 1 {
 		t.Fatal("saving ran a command")
 	}
+	if got := request("DELETE", path, "", false); got.Code != 415 {
+		t.Fatalf("unprotected delete: %d", got.Code)
+	}
+	if got := request("GET", path, "", false); got.Code != 200 {
+		t.Fatal("unprotected delete removed entry")
+	}
+	if got := request("DELETE", path, "", true); got.Code != 204 || got.Body.Len() != 0 {
+		t.Fatalf("delete: %d %s", got.Code, got.Body)
+	}
+	if got := request("GET", path, "", false); got.Code != 404 {
+		t.Fatalf("get deleted: %d", got.Code)
+	}
+	if got := request("DELETE", path, "", true); got.Code != 404 {
+		t.Fatalf("delete missing: %d", got.Code)
+	}
+
 }
 func TestConfigurationStorageFailureDoesNotBreakViewer(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "file")

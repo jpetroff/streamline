@@ -19,11 +19,13 @@ in [Keyboard navigation framework](keyboard-navigation.md).
 
 | Source | Responsibility |
 | --- | --- |
-| `web/src/App.svelte` | Source controls/list, selection, preference map, keyboard registry, viewport shell |
+| `web/src/App.svelte` | Tab-controller subscription, source/command controls, configuration loading, keyboard registry, viewport shell |
+| `web/src/lib/tabs.ts` | `SourceTab`, `TabState`, `TabController`: stable tab identity, per-tab drafts/preferences, process mutations, source-list reconciliation |
+| `web/src/lib/components/SourceTabs.svelte` | Tab strip, +/close controls, selection/focus, local navigation keys, overflow visibility |
 | `web/src/lib/components/SourceViewer.svelte` | Active controller, panels, row selection, live snapshots, saved-configuration application, save/restore on source switch |
 | `web/src/lib/components/ConfigurationSettings.svelte` | Settings dialog, saved-entry list, text editor, dirty-state and focus ownership |
 | `web/src/lib/configurations.ts` | Configuration/draft types, serialization, validation feedback, HTTP client |
-| `web/src/lib/transport/sources.ts` | Source HTTP/SSE client and in-memory source preference type |
+| `web/src/lib/transport/sources.ts` | Source HTTP/SSE client and in-memory tab preference type |
 | `web/src/lib/side-panels.ts` | Shared panel definitions, defaults, and sizing policy |
 | `web/src/lib/components/SidePanel.svelte` | Reusable panel shell, visibility, and resizing |
 | `web/src/app.css` | Dark-only tokens, Tailwind theme mapping, viewport containment |
@@ -39,13 +41,38 @@ in [Keyboard navigation framework](keyboard-navigation.md).
 ## Visual shell and containment
 
 `html`, `body`, and `#app` occupy the viewport and hide document overflow.
-`App.svelte` places the source toolbar and optional command editor/status controls
-above a keyed `SourceViewer`. The toolbar settings trigger opens a modal
+`App.svelte` places `SourceTabs` and the settings trigger in the application
+header. The selected tab's `tabpanel` contains the source selector, optional
+command editor/status controls, and keyed `SourceViewer`. Source selection is
+below the tabs: stdin is fixed and disabled; command tabs offer command and a
+disabled file option. The settings trigger opens a modal
 [configuration editor](saved-configurations.md). The viewer is a horizontal flex layout: Columns/Filters,
 main region, and Row details. Panels fill the remaining viewport height.
 The central region stacks the table, compact table toolbar, and search editor;
 all three share the width left between the panels. `min-h-0` and `min-w-0` let each region shrink without
 pushing the table's scrollbars outside the visible area.
+
+### Tab strip and prepared tabs
+
+Stdin is permanently first, initially selected, and has no close or command-run
+controls. + opens a selected blank command tab and focuses its editor without
+creating a backend source. It defaults to Auto, normalized command columns, empty
+filters/search, following, and one-line rows. Until a capture is created it displays
+“New command”; afterward its title uses the executed command, not the draft.
+A tab without a source shows an empty-state prompt instead of mounting a viewer.
+
+Tabs have connected top borders, an active background, truncated monospace titles,
+full-command tooltips, and compact status dots. Close is a separate sibling button,
+not nested inside the tab button, and stops/discards the capture without confirmation.
+The old command-area Close and discard action is absent. Run, Stop, and Run again
+remain below the tabs. Pending operations disable that tab's mutation controls;
+other tabs remain usable and command/mode drafts remain editable.
+
+The strip uses `tablist`/`tab`, `aria-selected`, roving `tabindex`, and linked
+`tabpanel` IDs. + stays outside the horizontal scroller. Selection and a
+`ResizeObserver` reveal the entire active tab, including its close button;
+vertical strip overflow is hidden. See [tab navigation](keyboard-navigation.md#tab-navigation)
+for keys and focus restoration.
 
 ### Shared side panels
 
@@ -103,9 +130,11 @@ The design is dark-only. `:root` owns the semantic OKLCH palette and declares
 
 ## Source viewer lifecycle
 
-`App` owns source metadata and selection. Each keyed `SourceViewer` creates one
-`ViewerController` and seeds a
-Svelte `$state` value from `controller.state`. During `onMount` it:
+`TabController` owns tab metadata and selection; `App` subscribes through a
+`$state.raw<TabState>` snapshot. A UI tab ID remains stable while its optional
+backend source ID changes on Run. Preferences and command/mode drafts belong to
+the tab. Each `SourceViewer`, keyed by both IDs, creates one `ViewerController`
+and seeds a Svelte `$state` value from `controller.state`. During `onMount` it:
 
 1. subscribes to complete immutable `ViewerState` snapshots;
 2. assigns each snapshot to the reactive `viewer` value;
@@ -116,21 +145,30 @@ Svelte `$state` value from `controller.state`. During `onMount` it:
 The controller is created before mount, but network and browser-lifecycle work
 starts only in `onMount`. This keeps resource ownership aligned with the Svelte
 component lifetime. Source switching leaves capture running and recreates only
-the viewer query. Saved preferences exclude row caches and snapshot tokens.
+the viewer query. `TabController.save` accepts an unmount snapshot only if that
+tab still owns the same source, so an old viewer cannot overwrite replacement
+preferences. Saved preferences exclude row caches and snapshot tokens.
 See [source switching and notifications](command-sources.md#viewer-switching-and-notifications).
 
 `snapshot()` copies the retained applied specification and current column settings
 without unmounting. `applyConfiguration()` submits filters/search together through
 `setQueryAndWait`, then commits columns and increments editor revision keys. Raw
 input retains the specification without querying. Load guards the original tab
-across file reads, validation, and query replacement. Run seeds inherited settings
-before mounting its new viewer; persisted bundles exclude session preferences.
+across file reads, validation, and query replacement. Prepared tabs store validated
+settings locally; loading a command configuration from stdin creates a prepared
+command tab. Run snapshots applied settings, awaits source deletion, then creates
+a replacement in the same tab. Its new viewer resumes following with no old row
+position/selection or details, while retaining applied settings and row height.
+Persisted bundles exclude session preferences.
 
 `viewer` and `controller` are passed to either `VirtualLogTable` or
 `RawOutput` as typed `$props`. Components do not call `fetch` or construct
 `EventSource` directly; they express viewport or next-chunk intent to the controller.
 
 ## Input-mode rendering
+
+Before a source exists, `App` renders “Enter a command and click Run to view its
+output.” or “Starting command…” during creation. It does not issue viewer requests.
 
 `SourceViewer.svelte` renders Connecting before session recovery, a source-specific
 waiting/completion message while classification is pending, the virtual table for `records`, and a scrollable

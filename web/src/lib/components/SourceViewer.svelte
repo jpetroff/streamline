@@ -25,6 +25,7 @@
   } = $props();
   const initial = untrack(() => preferences);
   const controller = new ViewerController(new HTTPQueryAPI(untrack(() => sourceId === 'stdin' ? '/api/v1' : `/api/v1/sources/${encodeURIComponent(sourceId)}`)));
+  let table = $state<ReturnType<typeof VirtualLogTable>>();
   let activeRow = $state.raw<ActiveRow>();
   let navigator = $state<RowNavigator>();
   let previewOpen = $state(false);
@@ -39,7 +40,7 @@
 
   export function snapshot(): SourcePreferences {
     return { spec: { filter: retainedSpec.filter.map(filter => ({ ...filter })), sort: retainedSpec.sort, search: retainedSpec.search ? { ...retainedSpec.search } : undefined },
-      columns: columns.map(column => ({ ...column })), following: viewer.following, offset: activeRow?.offset, rowLines, inheritOnRun };
+      columns: table?.snapshotColumns() ?? columns.map(column => ({ ...column })), following: viewer.following, offset: activeRow?.offset, rowLines, inheritOnRun };
   }
 
   export async function applyConfiguration(doc: Configuration) {
@@ -55,6 +56,7 @@
     inheritOnRun = true;
     columns = doc.columns.map(column => ({ ...column }));
     editorRevision++;
+    await tick();
   }
 
   let rowLines = $state<1 | 2>(initial?.rowLines ?? 1);
@@ -149,11 +151,16 @@
           <div class="grid h-full place-items-center px-6 text-sm text-muted-foreground" role="status">{info?.state === 'stopped' ? 'Command stopped without output.' : info?.state === 'failed' ? 'Command failed without output.' : 'Command completed without output.'}</div>
         {:else}
           <VirtualLogTable
+            bind:this={table}
             {viewer}
             {controller}
             {columns}
             {rowLines}
             onDateFormatChange={setDateFormat}
+            onColumnWidthsChange={widths => {
+              inheritOnRun = true;
+              columns = columns.map((column, index) => ({ ...column, width: widths[index] }));
+            }}
             bind:activeRow
             bind:navigator
             onReset={() => { previewOpen = false; }}

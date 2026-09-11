@@ -1,6 +1,7 @@
 # Command log sources
 
-Implemented: concurrent command tabs plus permanent stdin. Linux/macOS only;
+Implemented: persistent UI command tabs with replaceable captures, plus permanent
+stdin. Command execution is Linux/macOS only;
 `/bin/sh -c`, combined stdout/stderr, no interactive input or local PTY.
 
 ## Code map
@@ -13,7 +14,9 @@ Implemented: concurrent command tabs plus permanent stdin. Linux/macOS only;
 | [stdin_unix.go](../internal/source/stdin_unix.go) | Pollable stdin duplicate; interrupt pending reads and restore original descriptor flags |
 | [stdin.go](../internal/ingest/stdin.go) | `Capture` flushes batches; `Completion.Publish` commits terminal state |
 | [sources.go](../internal/httpapi/sources.go) | Source JSON/SSE routes, scoped query dispatch, Host/Origin/header checks |
-| [App.svelte](../web/src/App.svelte) | Command form, selected source, descriptors, preference map, shared keyboard registry |
+| [App.svelte](../web/src/App.svelte) | Subscribe to tab state, command form, source-list connection, configuration loading, shared keyboard registry |
+| [tabs.ts](../web/src/lib/tabs.ts) | Stable tab IDs, drafts/preferences, selection, serialized mutations, source-event reconciliation |
+| [SourceTabs.svelte](../web/src/lib/components/SourceTabs.svelte) | Tab-bar open/close/select controls, keyboard focus and navigation, responsive overflow |
 | [SourceViewer.svelte](../web/src/lib/components/SourceViewer.svelte) | One mounted viewer: controller, queries/cache, panels, row selection, preference restoration, live snapshot/application |
 | [sources.ts](../web/src/lib/transport/sources.ts) | `HTTPSourceAPI`, `SourcePreferences`; wire descriptors are `LogSource` in `types.ts` |
 
@@ -21,7 +24,7 @@ Implemented: concurrent command tabs plus permanent stdin. Linux/macOS only;
 
 ```mermaid
 flowchart LR
-  UI["App: Run command"] -->|"POST /sources"| Manager["Source manager"]
+  UI["TabController: Run command"] -->|"DELETE previous capture if any, then POST /sources"| Manager["Source manager"]
   Manager --> Shell["New OS session: /bin/sh -c"]
   Shell -->|"stdout + stderr"| Pipe["Shared OS pipe"]
   Pipe --> Capture["ingest.Capture + parser"]
@@ -39,7 +42,10 @@ flowchart LR
 
 Each source has its own query service, parser invocation, and session identity.
 Command IDs are `command-` plus the random query-session ID; generations and row
-IDs are source-local. Existing unscoped query routes remain stdin aliases.
+IDs are source-local. UI IDs (`tab-1`, `tab-2`, …) are separate, local to the
+browser, and survive replacement of the associated backend source. A blank UI tab
+has no source ID and makes no capture/query requests. Existing unscoped query
+routes remain stdin aliases.
 See [transport contracts](transport.md#independent-command-sources) for endpoints.
 
 ## Execution decisions
@@ -62,9 +68,9 @@ new command capture; stdin always uses Auto. The parser specification defines
 [capture/publication ordering](parser.md#capture-publication-and-terminal-status).
 
 Text mode does not expose structured fields or normalized timestamps/severity.
-Command columns default to `timestamp`, `severity`, `message` when no explicit
-settings are inherited. Stdin keeps its existing defaults. Run from a configured
-source inherits applied columns, filters, and search; see
+New command tabs default to `timestamp`, `severity`, `message` columns with no
+filters/search. Stdin keeps its existing defaults. Run retains that tab's applied
+columns, filters, search, and row height; it does not copy another tab's settings. See
 [saved configurations](saved-configurations.md#state-transitions). SSH needs preconfigured authentication; use `-tt` if a remote
 PTY is required without a local tty. Commands are never rewritten automatically.
 
@@ -134,9 +140,11 @@ sequenceDiagram
    creation after deletion retains a prepared tab with its draft and error.
    Unknown event sources are deferred during creates to avoid duplicate tabs
    when SSE precedes HTTP. Completion never selects a different tab.
-6. Closing or external deletion selects the right neighbor, otherwise the left.
-   Blank tabs survive source-list updates. Reload selects stdin and discovers
-   backend runs; blank tabs, drafts, preferences, and UI ordering are not persisted.
+6. Closing or external deletion of the active tab selects the right neighbor,
+   otherwise the left; removing a background tab leaves selection unchanged.
+   Stdin cannot be closed or repurposed. Blank tabs survive source-list updates.
+   Reload selects stdin and discovers backend runs; blank tabs, drafts, preferences,
+   and UI ordering are not persisted.
    A reload during delete-then-create can interrupt replacement between requests.
 
 Saved configurations remain separate persistent files. Load never executes:
@@ -148,8 +156,15 @@ One source-list EventSource remains open; only the active viewer owns query SSE
 use a one-slot invalidation queue and send the full descriptor list on connection
 and changes. They do not use the query stream's 100 ms timer. Both streams use
 15-second heartbeats and five-second write deadlines; neither carries log rows.
-`TabController.revision` rejects stale initial lists; per-tab mutations never
-override the current selection; viewer guards reject stale row/query
+`TabController.revision` advances for source lists and process mutation intents,
+rejecting a startup GET that predates a new run even while source SSE reconnects.
+During creates, unknown source IDs are held until HTTP responses identify their
+tabs; then externally created captures are appended in source-list order. Newer
+SSE descriptors take precedence over create-response lifecycle state.
+`removedDuringCreates` prevents a delayed response from resurrecting a source
+already deleted by another client. Stop reconciles external deletion again after
+its pending response settles. `selectionRevision` guards configuration loading;
+process completion never changes selection. Viewer guards reject stale row/query
 responses. Preserve these boundaries when adding sources or reconnect behavior.
 
 ## Debugging and verification
@@ -181,9 +196,14 @@ bun run --bun --filter @streamline/web test:e2e commands.spec.ts
   shell syntax, isolation, failed startup/exit, repeated Stop, resistant background
   writers, inherited descriptors, removal, and open-stdin shutdown.
 - [HTTP tests](../internal/httpapi/sources_test.go): scoped queries, stdin aliases,
-  request rejection, lifecycle events, reconnect. [Browser tests](../web/e2e/commands.spec.ts)
-  run standalone binaries and cover tabs, reload, failures, late responses,
-  cross-client deletion, and preference restoration. Build the binary first.
+  request rejection, lifecycle events, reconnect.
+- [Tab-controller tests](../web/tests/tabs.test.ts): independent defaults/drafts,
+  neighbor selection, stdin immutability, delete-before-create ordering, retained
+  settings, failed mutations, stale saves, concurrent creates, and external deletion.
+- [Browser tests](../web/e2e/commands.spec.ts) run standalone binaries and cover
+  replacement of live commands, Stop, reload discovery, prepared tabs, local keys,
+  background close, failures/retry, delayed startup/create responses, external
+  deletion, and wide/narrow overflow including the active close button. Build first.
 - Implementation verification passed on Linux, including race checks. macOS
   cross-compilation passed; native process cleanup remains unverified.
 - The optional terminal-dataset test checks raw fallback and safe display. It

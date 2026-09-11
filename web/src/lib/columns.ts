@@ -16,6 +16,7 @@ export type DateDisplayFormat = typeof DATE_FORMAT_OPTIONS[number]['value'];
 export interface ColumnConfig {
   path: string;
   dateFormat: DateDisplayFormat;
+  width?: number;
 }
 
 export interface DateFormatContext {
@@ -172,6 +173,6 @@ export function configureColumns(
 
   return paths.map(path => {
     const previous = available.get(path)?.shift();
-    return { path, dateFormat: previous?.dateFormat ?? 'original' };
+    return previous ? { ...previous } : { path, dateFormat: 'original' };
   });
 }

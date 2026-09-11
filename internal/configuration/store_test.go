@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -189,5 +191,105 @@ func TestDirectoryOverride(t *testing.T) {
 	want, _ := filepath.Abs("relative-settings")
 	if err != nil || got != want {
 		t.Fatalf("override %q %v", got, err)
+	}
+}
+
+func TestNamedFilenames(t *testing.T) {
+	store := New(t.TempDir())
+	for name, prefix := range map[string]string{
+		"Service Errors / production": "service-errors-production",
+		"../../ My config!":           "my-config",
+		"🔥 / 日本語":                     "configuration",
+		strings.Repeat("A", 200):      strings.Repeat("a", 95),
+	} {
+		doc := sample()
+		doc.Name = name
+		entry, err := store.Save("", doc)
+		if err != nil || !regexp.MustCompile("^"+prefix+"-[a-f0-9]{32}$").MatchString(entry.ID) || !safeID.MatchString(entry.ID) {
+			t.Fatalf("name %q: %#v %v", name, entry, err)
+		}
+		duplicate, err := store.Save("", doc)
+		if err != nil || duplicate.ID == entry.ID {
+			t.Fatalf("duplicate name: %#v %v", duplicate, err)
+		}
+		doc.Name = "Renamed"
+		updated, err := store.Save(entry.ID, doc)
+		if err != nil || updated.ID != entry.ID {
+			t.Fatalf("update must keep ID stable: %#v %v", updated, err)
+		}
+	}
+}
+
+func TestDelete(t *testing.T) {
+	store := New(t.TempDir())
+	entry, err := store.Save("", sample())
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := store.Save("", sample())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Delete(entry.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Get(entry.ID); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("deleted entry: %v", err)
+	}
+	if _, err := store.Get(other.ID); err != nil {
+		t.Fatalf("other entry: %v", err)
+	}
+	for _, id := range []string{entry.ID, "../outside", "/tmp/file", "a/b", "..", ""} {
+		if err := store.Delete(id); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("missing/unsafe ID %q: %v", id, err)
+		}
+	}
+	outside := filepath.Join(t.TempDir(), "outside.json")
+	if err := os.WriteFile(outside, marshal(t, sample()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(store.Directory, "configs", "link.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Delete("link"); err == nil {
+		t.Fatal("accepted symlink")
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatal("removed symlink target")
+	}
+	if err := os.WriteFile(filepath.Join(store.Directory, "configs", "legacy.json"), marshal(t, sample()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Delete("legacy"); err != nil {
+		t.Fatalf("legacy filename: %v", err)
+	}
+}
+
+func TestColumnWidths(t *testing.T) {
+	for _, width := range []float64{144, 280.5, 1024} {
+		doc := sample()
+		doc.Columns[0].Width = &width
+		store := New(t.TempDir())
+		entry, err := store.Save("", doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		restored, err := store.Get(entry.ID)
+		if err != nil || !reflect.DeepEqual(restored.Document, doc) {
+			t.Fatalf("width round trip: %#v %v", restored, err)
+		}
+	}
+	for _, width := range []float64{-1, 0, 143, math.Inf(1), math.NaN()} {
+		doc := sample()
+		doc.Columns[0].Width = &width
+		if err := Validate(doc); err == nil {
+			t.Fatalf("accepted width %v", width)
+		}
+	}
+	for _, width := range []string{`null`, `"200"`, `false`, `0`, `143`, `1e999`} {
+		data := strings.Replace(string(marshal(t, sample())), `"path":"timestamp"`, `"path":"timestamp","width":`+width, 1)
+		if _, err := Decode([]byte(data)); err == nil {
+			t.Fatalf("accepted width %s", width)
+		}
 	}
 }

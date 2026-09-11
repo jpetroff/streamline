@@ -292,7 +292,7 @@ These tests launch their own standalone binaries.
 
 Click the **settings icon** at the right of the top bar to open **Saved configurations**.
 **Save current as new** captures the active tab’s actual command/output mode and
-applied columns, date formats, field filters, and general search. Unrun command
+applied columns, their displayed widths, date formats, field filters, and general search. Unrun command
 text and unapplied editor drafts are excluded for tabs that have run. A prepared
 tab that has not run saves its command draft and prepared settings. Stdin entries
 have an empty command.
@@ -300,9 +300,10 @@ have an empty command.
 Give the entry a name and use the three textareas to edit its command, column JSON,
 and filters/search JSON. **Save** writes the entry without changing the current tab.
 **Edit** updates an entry; **Clone and edit** starts an independent unsaved copy.
+**Delete** removes the saved entry from disk without changing the active tab.
 Unsaved changes must be saved or discarded before leaving the editor.
 
-**Load** replaces the active tab’s columns, filters, and search and fills the command
+**Load** replaces the active tab’s columns (including saved widths), filters, and search and fills the command
 editor and output mode. It does not start, stop, or rename a running source. Click
 **Run** to replace the capture in the same tab with those settings. **Run again**
 uses the selected source’s original command/mode with its current applied settings.
@@ -317,7 +318,9 @@ Settings live on the machine running the Go binary, in:
 - Development: `.local/streamline/configs/` in the repository, ignored by Git.
 - Override: `streamline -config-dir /path/to/settings` (files go in its `configs/` subdirectory).
 
-Each entry is a self-contained UTF-8 JSON file. Copy files between configuration
+Each entry is a self-contained UTF-8 JSON file. New filenames combine the sanitized
+name and a random hex suffix, such as `service-errors-<hash>.json`. Editing an entry
+keeps its filename stable; existing filenames remain supported. Copy files between configuration
 folders to transfer entries; use **Refresh** or reopen settings to discover external
 changes. A safe filename such as `errors.json` is supported; names shown in the UI
 are independent of filenames and need not be unique. Malformed or unsupported files
@@ -332,8 +335,8 @@ New directories/files are private (`0700`/`0600`).
   "command": "journalctl -f -o json --no-pager",
   "mode": "auto",
   "columns": [
-    { "path": "timestamp", "dateFormat": "iso" },
-    { "path": "message", "dateFormat": "original" }
+    { "path": "timestamp", "dateFormat": "iso", "width": 280 },
+    { "path": "message", "dateFormat": "original", "width": 600 }
   ],
   "filters": {
     "filter": [{ "field": "PRIORITY", "op": "eq", "value": "3" }],
@@ -343,6 +346,8 @@ New directories/files are private (`0700`/`0600`).
 ```
 
 Column date formats are `original`, `iso`, `local`, `date`, and `time`.
+Each column accepts an optional `width` in pixels (at least 144). Omit it for
+automatic sizing. Saved widths apply when loading and remain adjustable in the table.
 The Filters and search textarea edits the entire `filters` object shown above;
 the existing sidebar filter importer continues to accept just a filter array.
 Browser regex checks in settings are advisory because browser and Go syntax differ.

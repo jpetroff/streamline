@@ -13,7 +13,7 @@
 | `internal/ingest` | Reader capture, commit batching, deferred terminal publication |
 | `internal/parse` | Streaming framing, terminal sanitization, stream classification, and journald/JSON/logfmt/syslog/HTTP access/text normalization |
 | `internal/webassets` | Embedded frontend in release builds; development build excludes assets |
-| `web` | Svelte 5 viewer controller, HTTP/SSE client, 32 MB page cache, dark application shell, and segmented virtual log table |
+| `web` | Svelte 5 tab/viewer controllers, HTTP/SSE client, 32 MB page cache, dark application shell, and segmented virtual log table |
 | UI foundations | shadcn-svelte configuration, Bits UI, dark neutral theme, class utility, and Lucide icons |
 | Installed for later | ECharts |
 
@@ -25,6 +25,17 @@ for process ownership, lifecycle diagrams, and debugging entry points.
 See [parser flow and revisitable decisions](parser.md) for the implemented
 normalization boundary. [Saved configurations](saved-configurations.md) documents
 file persistence, live snapshots, and command preparation.
+
+UI tabs and backend captures have separate lifetimes. `TabController` owns a
+permanent stdin tab and local command tabs with independent drafts/preferences.
++ opens a blank tab without a process. Run/Run again await deletion of the old
+capture, then attach a new source ID to the same tab; closing stops/discards it.
+Only the active sourced tab mounts a viewer, keyed by tab and source identity.
+The source selector and command controls sit below the tab strip. Backend source
+endpoints are unchanged; no tab endpoint or persistent tab store was added.
+Reload discovers retained backend runs and selects stdin, but drops blank tabs,
+drafts, local ordering, and viewer preferences. See [frontend tabs](frontend.md#tab-strip-and-prepared-tabs)
+and [source lifecycle](command-sources.md#viewer-switching-and-notifications).
 
 ## Implemented binary–frontend protocol
 

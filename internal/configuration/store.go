@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,8 +32,9 @@ type Document struct {
 	Filters Filters  `json:"filters"`
 }
 type Column struct {
-	Path       string `json:"path"`
-	DateFormat string `json:"dateFormat"`
+	Path       string   `json:"path"`
+	DateFormat string   `json:"dateFormat"`
+	Width      *float64 `json:"width,omitempty"`
 }
 type Filters struct {
 	Filter query.FilterList  `json:"filter"`
@@ -90,12 +92,18 @@ func Decode(data []byte) (Document, error) {
 		}
 	}
 	var nested struct {
+		Columns []map[string]json.RawMessage `json:"columns"`
 		Filters struct {
 			Search map[string]json.RawMessage `json:"search"`
 		} `json:"filters"`
 	}
 	if err := json.Unmarshal(data, &nested); err != nil {
 		return fail("Invalid filters and search object.")
+	}
+	for i, column := range nested.Columns {
+		if width, ok := column["width"]; ok && bytes.Equal(bytes.TrimSpace(width), []byte("null")) {
+			return doc, &ValidationError{[]Issue{{Field: "columns", Index: i + 1, Message: "width must be a finite number of at least 144 pixels."}}}
+		}
 	}
 	for _, key := range []string{"text", "mode", "operator"} {
 		value, ok := nested.Filters.Search[key]
@@ -126,6 +134,9 @@ func Validate(doc Document) error {
 	for i, column := range doc.Columns {
 		if strings.TrimSpace(column.Path) == "" {
 			issues = append(issues, Issue{Field: "columns", Index: i + 1, Message: "Enter a nonempty column path."})
+		}
+		if column.Width != nil && (math.IsNaN(*column.Width) || math.IsInf(*column.Width, 0) || *column.Width < 144) {
+			issues = append(issues, Issue{Field: "columns", Index: i + 1, Message: "width must be a finite number of at least 144 pixels."})
 		}
 		switch column.DateFormat {
 		case "original", "iso", "local", "date", "time":
@@ -164,6 +175,7 @@ func Validate(doc Document) error {
 	return nil
 }
 
+var unsafeName = regexp.MustCompile(`[^a-z0-9]+`)
 var safeID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`)
 
 // Store opens the directory per operation so filesystem errors cannot prevent viewing logs.
@@ -267,6 +279,35 @@ func randomID() (string, error) {
 	}
 	return hex.EncodeToString(data[:]), nil
 }
+
+// filenameName keeps generated IDs portable and within the 128-character limit.
+func filenameName(name string) string {
+	name = unsafeName.ReplaceAllString(strings.ToLower(name), "-")
+	if len(name) > 95 {
+		name = name[:95]
+	}
+	name = strings.Trim(name, "-")
+	if name == "" {
+		return "configuration"
+	}
+	return name
+}
+
+// Delete only removes valid saved entries, under the same lock used by Save.
+func (s *Store) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	root, err := s.open()
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	if _, err := read(root, id); err != nil {
+		return err
+	}
+	return root.Remove(id + ".json")
+}
+
 func (s *Store) Save(id string, doc Document) (Entry, error) {
 	if err := Validate(doc); err != nil {
 		return Entry{}, err
@@ -288,6 +329,7 @@ func (s *Store) Save(id string, doc Document) (Entry, error) {
 	defer root.Close()
 	if id == "" {
 		id, err = randomID()
+		id = filenameName(doc.Name) + "-" + id
 	} else {
 		_, err = read(root, id)
 	}

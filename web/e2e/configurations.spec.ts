@@ -59,6 +59,7 @@ test('captures applied active settings, edits and clones, persists through resta
   await page.getByLabel('Search', { exact: true }).fill('timeout');
   await page.getByLabel('Search', { exact: true }).press('Control+Enter');
   await expect(page.getByRole('region', { name: 'General search' }).getByRole('button', { name: 'Apply', exact: true })).toBeDisabled();
+  const capturedColumns = await page.getByRole('columnheader').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().width));
   // Unapplied drafts and an unrun command must not leak into the captured bundle.
   await page.getByLabel('Column paths', { exact: true }).fill('unapplied');
   await page.getByLabel('Search', { exact: true }).fill('unapplied');
@@ -67,7 +68,7 @@ test('captures applied active settings, edits and clones, persists through resta
   await dialog.getByRole('button', { name: 'Save current as new' }).click();
   await expect(dialog.locator('textarea')).toHaveCount(3);
   await expect(dialog.getByLabel('Command', { exact: true })).toHaveValue(command);
-  expect(JSON.parse(await dialog.getByLabel('Column setup (JSON)').inputValue())).toEqual(bundle().columns);
+  expect(JSON.parse(await dialog.getByLabel('Column setup (JSON)').inputValue())).toEqual(bundle().columns.map((column, index) => ({ ...column, width: capturedColumns[index] })));
   expect(JSON.parse(await dialog.getByLabel('Filters and search (JSON)').inputValue())).toEqual(bundle().filters);
   await dialog.getByLabel('Name', { exact: true }).fill('Errors');
   await dialog.getByLabel('Name', { exact: true }).press('Control+Enter');
@@ -85,6 +86,7 @@ test('captures applied active settings, edits and clones, persists through resta
   dialog = await settings(page);
   await expect(dialog.getByRole('article')).toHaveCount(2);
   const files = await readdir(join(directory, 'configs')); expect(files).toHaveLength(2);
+  expect(files.every(file => /^errors(?:-copy)?-[a-f0-9]{32}\.json$/.test(file))).toBe(true);
   const docs = await Promise.all(files.map(file => readFile(join(directory, 'configs', file), 'utf8').then(JSON.parse)));
   expect(docs.find(doc => doc.name === 'Saved errors').command).toBe(command);
   await stop(); await start(); await page.goto(apiURL);
@@ -99,6 +101,7 @@ test('captures applied active settings, edits and clones, persists through resta
   await expect(page.getByRole('cell', { name: 'healthy', exact: true })).toHaveCount(0);
   await expect(page.getByLabel('Date display for timestamp')).toHaveValue('iso');
   await expect(page.getByLabel('Search', { exact: true })).toHaveValue('timeout');
+  expect(await page.getByRole('columnheader').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().width))).toEqual(capturedColumns);
 });
 
 test('loading resets equal-valued editor drafts and retains current results on query failure', async ({ page }) => {
@@ -232,4 +235,95 @@ test('loading a commandless configuration keeps stdin selected', async ({ page, 
   await expect(page.getByRole('tab', { name: 'stdin', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByLabel('Column paths', { exact: true })).toHaveValue('timestamp\nmessage');
   expect(await request.get(`${apiURL}/api/v1/sources`).then(r => r.json())).toHaveLength(1);
+});
+
+test('deletes saved entries, guards dirty drafts, and leaves the active tab intact', async ({ page }) => {
+  await putFile(); await page.goto(apiURL); await run(page);
+  await expect(page.getByRole('cell', { name: 'healthy', exact: true })).toBeVisible();
+  const dialog = await settings(page);
+  const entry = dialog.getByRole('article', { name: 'Errors', exact: true });
+  await entry.getByRole('button', { name: 'Edit', exact: true }).click();
+  await dialog.getByLabel('Name', { exact: true }).fill('Unsaved');
+  await entry.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(dialog.getByText('Save your changes or discard them before continuing.')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Keep editing' }).click();
+  expect(await readdir(join(directory, 'configs'))).toEqual(['imported.json']);
+  await entry.getByRole('button', { name: 'Delete', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Save and continue' }).click();
+  await expect(dialog.getByRole('status')).toHaveText('Configuration deleted.');
+  await expect(dialog.getByRole('article')).toHaveCount(0);
+  await expect(dialog.getByRole('form', { name: 'Configuration editor' })).toHaveCount(0);
+  expect(await readdir(join(directory, 'configs'))).toEqual([]);
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(page.getByRole('cell', { name: 'healthy', exact: true })).toBeVisible();
+  await page.reload();
+  await settings(page);
+  await expect(page.getByText('No saved configurations yet.')).toBeVisible();
+});
+
+test('failed deletion preserves the entry and editor for retry', async ({ page }) => {
+  await putFile(); await page.goto(apiURL);
+  const dialog = await settings(page);
+  const entry = dialog.getByRole('article', { name: 'Errors', exact: true });
+  await entry.getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.route('**/configurations/imported', route => route.request().method() === 'DELETE'
+    ? route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'configuration_storage_error', message: 'Could not delete configuration' } }) }) : route.continue());
+  await entry.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Could not delete configuration');
+  await expect(entry).toBeVisible();
+  await expect(dialog.getByLabel('Name', { exact: true })).toHaveValue('Errors');
+  expect(await readdir(join(directory, 'configs'))).toEqual(['imported.json']);
+  await page.unroute('**/configurations/imported');
+  await entry.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(dialog.getByRole('status')).toHaveText('Configuration deleted.');
+});
+
+test('loads independent duplicate-column widths, saves resized widths, and restores them across tabs', async ({ page }) => {
+  const doc = bundle();
+  doc.columns = [
+    { path: 'timestamp', dateFormat: 'iso', width: 240 },
+    { path: 'message', dateFormat: 'original', width: 360 },
+    { path: 'message', dateFormat: 'original', width: 480 },
+  ];
+  await putFile(doc); await page.goto(apiURL);
+  let dialog = await settings(page);
+  await dialog.getByRole('article', { name: 'Errors' }).getByRole('button', { name: 'Load', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await expect(page.getByRole('cell', { name: 'timeout', exact: true }).first()).toBeVisible();
+  const widths = () => page.getByRole('columnheader').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().width));
+  expect(await widths()).toEqual([240, 360, 480]);
+  const handle = page.getByRole('button', { name: 'Resize timestamp column', exact: true });
+  const box = (await handle.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 80, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  await page.getByRole('button', { name: 'Resize message column', exact: true }).nth(1).press('ArrowRight');
+  expect(await widths()).toEqual([320, 360, 496]);
+  const tabId = await page.getByRole('tab', { selected: true }).getAttribute('id');
+  await page.getByRole('tab', { name: 'stdin', exact: true }).click();
+  await page.locator(`#${tabId}`).click();
+  await expect.poll(widths).toEqual([320, 360, 496]);
+  dialog = await settings(page);
+  await dialog.getByRole('button', { name: 'Save current as new' }).click();
+  expect(JSON.parse(await dialog.getByLabel('Column setup (JSON)').inputValue()).map((column: { width: number }) => column.width)).toEqual([320, 360, 496]);
+  await dialog.getByLabel('Name', { exact: true }).fill('Resized');
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(dialog.getByRole('status')).toHaveText('Configuration saved.');
+  await dialog.getByRole('article', { name: 'Errors', exact: true }).getByRole('button', { name: 'Load', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await widths()).toEqual([240, 360, 480]);
+  // Legacy columns without widths must reset previous explicit sizes.
+  await putFile();
+  dialog = await settings(page);
+  await dialog.getByRole('article', { name: 'Errors', exact: true }).getByRole('button', { name: 'Load', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const automatic = await widths();
+  expect(automatic).toHaveLength(2);
+  expect(automatic[0]).toBe(automatic[1]);
+  dialog = await settings(page);
+  await dialog.getByRole('article', { name: 'Resized', exact: true }).getByRole('button', { name: 'Load', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await widths()).toEqual([320, 360, 496]);
 });

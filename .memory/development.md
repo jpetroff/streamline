@@ -141,18 +141,29 @@ only contains the shadcn configuration, theme, utility, and dependencies.
 
 ## Smoke checks
 
-After `make check`, verify the fixed stdin tab, +/close controls, source selector below the tabs, waiting state, parsed table, raw
-view, and health endpoint through Vite.
+After `make check`, verify the fixed stdin tab, +/close controls, source selector
+below the tabs, waiting state, parsed table, raw view, and health endpoint through Vite.
+Open independent command tabs, edit and Run in place, Stop without discarding,
+and close both active and background tabs. Confirm per-tab drafts/settings,
+neighbor selection, and Left/Right/Home/End/Delete while a tab is focused.
+At wide and narrow widths, verify that + stays accessible and the selected tab's
+close button remains visible after selection and resize.
 Stop development, run `make build`, and launch `bin/streamline` from another
 working directory to check that assets are embedded. Verify unknown API paths
 return 404 and Ctrl+C releases both development ports.
 
 Verify saved-entry capture/edit/clone, Load without execution, and Run with
-retained columns/filters/search in the same tab. Browser tests create temporary configuration
+retained columns/filters/search in the same tab. Load a command configuration from
+stdin and into a blank tab; neither should execute until Run. Reload discovers
+existing backend runs and selects stdin, while blank tabs and drafts are lost.
+Wait for Run to finish before testing reload discovery: delete-then-create can
+be interrupted between requests. Browser tests create temporary configuration
 roots and exercise restart persistence:
 
 ```sh
 bun run --bun --filter @streamline/web test:e2e configurations.spec.ts commands.spec.ts
+# Full browser suite, including keyboard and viewport geometry:
+bun run --bun --filter @streamline/web test:e2e
 ```
 
 See [Bun package management](https://bun.com/docs/pm/cli/install),

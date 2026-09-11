@@ -28,6 +28,13 @@ func WithConfigurations(frontend http.Handler, store *configuration.Store) http.
 		}
 		writeJSON(w, 200, entry)
 	})
+	mux.HandleFunc("DELETE /api/v1/configurations/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if err := store.Delete(r.PathValue("id")); err != nil {
+			configurationError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	save := func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, configuration.MaxBytes))

@@ -32,6 +32,7 @@
     columns,
     rowLines = 1,
     onDateFormatChange,
+    onColumnWidthsChange,
     activeRow = $bindable(),
     navigator = $bindable(),
     onReset,
@@ -41,6 +42,7 @@
     controller: ViewerController;
     columns: readonly ColumnConfig[];
     rowLines?: 1 | 2;
+    onColumnWidthsChange: (widths: number[]) => void;
     onDateFormatChange: (index: number, format: DateDisplayFormat) => void;
     activeRow?: ActiveRow;
     navigator?: RowNavigator;
@@ -55,8 +57,8 @@
   let lastVerticalOffset = 0;
   let viewportChanging = $state(false);
   const minimumColumnWidth = 144;
-  let columnWidths = $state<Record<string, number>>({});
-  let resize = $state<{ key: string; pointerId: number; startX: number; startWidth: number }>();
+
+  let resize = $state<{ index: number; pointerId: number; startX: number; startWidth: number }>();
   let segmentBase = $state(0n);
   let segmentCount = $state(0);
   let programmaticScroll = $state(false);
@@ -73,7 +75,7 @@
 
   let total = $derived(viewer.displayed ? BigInt(viewer.displayed.snapshot.matchedCount) : 0n);
   let rowsByOffset = $derived(indexPages(viewer.displayed?.pages ?? []));
-  let widths = $derived(columns.map((column, index) => columnWidths[`${index}:${column.path}`]));
+  let widths = $derived(columns.map(column => column.width));
   let gridTemplate = $derived(widths.map(width => width === undefined ? 'minmax(12rem, 1fr)' : `${width}px`).join(' '));
   let minimumTableWidth = $derived(`calc(${widths.map(width => width === undefined ? '12rem' : `${width}px`).join(' + ') || '0px'})`);
   let tableWidth = $derived(widths.length > 0 && widths.every(width => width !== undefined)
@@ -368,26 +370,34 @@
     if (row && event.shiftKey && event.button === 0) event.preventDefault();
   }
 
-  // Freeze the rendered widths so dragging one column leaves its neighbors unchanged.
-  function measureColumnWidths() {
-    const headers = headerElement.querySelectorAll<HTMLElement>('[role="columnheader"]');
-    columnWidths = Object.fromEntries(columns.map((column, index) => [
-      `${index}:${column.path}`,
-      headers[index].getBoundingClientRect().width,
-    ]));
+  // Capture actual flexible widths as well as explicitly resized columns.
+  export function snapshotColumns(): ColumnConfig[] {
+    const headers = headerElement?.querySelectorAll<HTMLElement>('[role="columnheader"]');
+    return columns.map((column, index) => {
+      const width = headers?.[index]?.getBoundingClientRect().width;
+      return width && width >= minimumColumnWidth ? { ...column, width } : { ...column };
+    });
   }
 
-  function startResize(event: PointerEvent, key: string) {
+  // Freeze the rendered widths so dragging one column leaves its neighbors unchanged.
+  function measureColumnWidths() {
+    const measured = snapshotColumns().map(column => column.width ?? minimumColumnWidth);
+    onColumnWidthsChange(measured);
+    return measured;
+  }
+
+  function startResize(event: PointerEvent, index: number) {
     if (event.button !== 0 || resize) return;
     event.preventDefault();
-    measureColumnWidths();
+    const measured = measureColumnWidths();
     (event.currentTarget as HTMLButtonElement).setPointerCapture(event.pointerId);
-    resize = { key, pointerId: event.pointerId, startX: event.clientX, startWidth: columnWidths[key] };
+    resize = { index, pointerId: event.pointerId, startX: event.clientX, startWidth: measured[index] };
   }
 
   function moveResize(event: PointerEvent) {
     if (!resize || event.pointerId !== resize.pointerId) return;
-    columnWidths[resize.key] = Math.max(minimumColumnWidth, resize.startWidth + event.clientX - resize.startX);
+    const width = Math.max(minimumColumnWidth, resize.startWidth + event.clientX - resize.startX);
+    onColumnWidthsChange(columns.map((column, index) => index === resize!.index ? width : column.width ?? minimumColumnWidth));
   }
 
   function endResize(event: PointerEvent) {
@@ -397,11 +407,12 @@
     if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
   }
 
-  function resizeWithKeyboard(event: KeyboardEvent, key: string) {
+  function resizeWithKeyboard(event: KeyboardEvent, index: number) {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     event.preventDefault();
-    measureColumnWidths();
-    columnWidths[key] = Math.max(minimumColumnWidth, columnWidths[key] + (event.key === 'ArrowRight' ? 16 : -16));
+    const measured = measureColumnWidths();
+    measured[index] = Math.max(minimumColumnWidth, measured[index] + (event.key === 'ArrowRight' ? 16 : -16));
+    onColumnWidthsChange(measured);
   }
 
   /** Builds the sparse logical-offset lookup used by currently mounted virtual rows. */
@@ -457,14 +468,14 @@
               <button
                 type="button"
                 class="resize-handle"
-                class:active={resize?.key === `${index}:${column.path}`}
+                class:active={resize?.index === index}
                 aria-label={`Resize ${column.path} column`}
-                onpointerdown={event => startResize(event, `${index}:${column.path}`)}
+                onpointerdown={event => startResize(event, index)}
                 onpointermove={moveResize}
                 onpointerup={endResize}
                 onpointercancel={endResize}
                 onlostpointercapture={endResize}
-                onkeydown={event => resizeWithKeyboard(event, `${index}:${column.path}`)}
+                onkeydown={event => resizeWithKeyboard(event, index)}
               ></button>
             </div>
           {/each}

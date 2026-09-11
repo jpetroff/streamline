@@ -73,6 +73,18 @@
     } catch (err) { showError(err); }
     finally { busy = false; }
   }
+  async function remove(entry: ConfigurationEntry) {
+    if (busy) return;
+    busy = true; error = ''; status = '';
+    try {
+      await api.remove(entry.id);
+      if (editingID === entry.id) { draft = undefined; editingID = undefined; baseline = ''; }
+      discardAction = undefined;
+      status = 'Configuration deleted.';
+      await refresh();
+    } catch (err) { showError(err); }
+    finally { busy = false; }
+  }
   async function save() {
     if (busy || !parsed?.document) return;
     busy = true; error = ''; status = ''; serverIssues = [];
@@ -126,6 +138,7 @@
                 <button type="button" class={button} disabled={busy} onclick={() => guarded(() => { void load(entry); })}>Load</button>
                 <button type="button" class={button} disabled={busy} onclick={() => guarded(() => { void edit(entry, false); })}>Edit</button>
                 <button type="button" class={button} disabled={busy} onclick={() => guarded(() => { void edit(entry, true); })}>Clone and edit</button>
+                <button type="button" class={button} disabled={busy || refreshing} onclick={() => guarded(() => { void remove(entry); })}>Delete</button>
               </div>
             </article>
           {/each}
@@ -146,7 +159,7 @@
               </div>
               <label class="block space-y-1 text-xs">Command<textarea class={`${input} min-h-20 font-mono`} rows="3" bind:value={draft.command} spellcheck="false"></textarea></label>
               <label class="block space-y-1 text-xs">Column setup (JSON)<textarea class={`${input} min-h-32 font-mono`} rows="7" bind:value={draft.columns} spellcheck="false" aria-describedby="saved-columns-help"></textarea></label>
-              <p id="saved-columns-help" class="text-xs text-muted-foreground">Example: <code>{'[{"path":"message","dateFormat":"original"}]'}</code></p>
+              <p id="saved-columns-help" class="text-xs text-muted-foreground">Example: <code>{'[{"path":"message","dateFormat":"original","width":400}]'}</code>. Width is optional, in pixels (minimum 144).</p>
               <label class="block space-y-1 text-xs">Filters and search (JSON)<textarea class={`${input} min-h-40 font-mono`} rows="9" bind:value={draft.filters} spellcheck="false" aria-describedby="saved-filters-help"></textarea></label>
               <p id="saved-filters-help" class="text-xs text-muted-foreground">Example: <code>{'{"filter":[],"search":{"text":"","mode":"plain","operator":"or"}}'}</code></p>
               <div aria-live="polite" class="space-y-1 text-xs">

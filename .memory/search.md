@@ -2,9 +2,11 @@
 
 Search is a query-scoped predicate over parsed log values. The browser owns
 editing and syntax feedback; Go owns query acceptance and matching. Defaults
-are Plain, OR, and case-insensitive. Applied search is retained per source and can
-be persisted in [saved configurations](saved-configurations.md). Raw-output search
-is excluded.
+are Plain, OR, and case-insensitive. Applied search is retained per UI tab,
+including when Run replaces its backend source, and can be persisted in
+[saved configurations](saved-configurations.md). A new tab starts with empty
+search; command drafts and unapplied search drafts do not execute automatically.
+Raw-output search is excluded.
 
 ## Architecture
 

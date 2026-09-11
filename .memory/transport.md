@@ -50,7 +50,9 @@ service when it builds the HTTP handler.
 
 The frontend separates concerns into wire types, an HTTP/SSE client, a bounded
 LRU page cache, a pure state reducer, and `ViewerController`. `App.svelte` owns
-source selection; its keyed `SourceViewer.svelte` owns the active controller. The virtual table renders only visible rows
+the tab-controller subscription and source controls; `TabController` owns tab
+selection/drafts/preferences, and `SourceViewer.svelte`, keyed by tab and source,
+owns the active viewer controller. The virtual table renders only visible rows
 and asks the controller for aligned pages around its overscanned viewport. See
 [Frontend visual output](frontend.md) for the Svelte and pixel-level path.
 
@@ -228,12 +230,21 @@ builds trust no additional origins; dev builds also allow configured Vite/test
 origins and `https://*.coder.intranet`.
 No CORS permission is granted to unrelated websites.
 
+The UI tab ID is not a transport identifier. + creates a local blank tab without
+an HTTP mutation. Run/Run again replace a sourced tab using awaited
+`DELETE /sources/{oldId}` followed by `POST /sources`; each run gets a fresh source,
+session, and query namespace while retaining the UI tab. There is no atomic
+replace endpoint, so reload between those requests can interrupt replacement.
+Closing a sourced tab uses DELETE; closing a blank tab is local. Stdin is immutable.
+
 The UI uses one source-list SSE connection and one active viewer controller
-(which can briefly overlap query streams while applying filters). Switching
-sources disposes query resources and retains only viewer preferences; returning
-creates a fresh query and restores the selected result position. Log ingestion
-is independent of all HTTP connections. Raw output uses the existing bounded
-chunk API; SSE never carries log rows.
+(which can briefly overlap query streams while applying filters). Switching tabs
+disposes query resources and retains per-tab drafts and applied preferences;
+returning creates a fresh query and restores the selected result position. Blank
+tabs mount no viewer. SSE lists describe backend captures, not local tabs; see
+[reconciliation guards](command-sources.md#viewer-switching-and-notifications).
+Log ingestion is independent of all HTTP connections. Raw output uses the existing
+bounded chunk API; SSE never carries log rows.
 
 
 ## Saved configurations
@@ -269,5 +280,6 @@ List isolates errors in individual files so other entries remain usable. Unsuppo
 versions and malformed files are never rewritten. There is no delete endpoint,
 watch stream, automatic history, or server-side load/execute endpoint.
 
-Loading and command inheritance are frontend operations; see
+Loading, prepared tabs, and retention of applied settings across runs are frontend
+operations; see
 [state transitions](saved-configurations.md#state-transitions).

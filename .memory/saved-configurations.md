@@ -11,7 +11,8 @@ binary. Source data and browser session preferences remain in memory.
 | [configurations.go](../internal/httpapi/configurations.go) | List/get/create/update/validate routes; injected through `NewConfiguredSourceHandler` |
 | [configurations.ts](../web/src/lib/configurations.ts) | TypeScript document/draft types, serialization, validation feedback, HTTP client |
 | [ConfigurationSettings.svelte](../web/src/lib/components/ConfigurationSettings.svelte) | Toolbar trigger, Bits UI dialog, entry list, editor, clone, dirty-state guards |
-| [SourceViewer.svelte](../web/src/lib/components/SourceViewer.svelte), [App.svelte](../web/src/App.svelte) | Live snapshots, configuration application, command preparation, per-tab preferences |
+| [SourceViewer.svelte](../web/src/lib/components/SourceViewer.svelte), [App.svelte](../web/src/App.svelte) | Live snapshots, configuration application, command preparation, selection/source guards |
+| [tabs.ts](../web/src/lib/tabs.ts) | Local prepared settings, per-tab drafts/preferences, stable identity through capture replacement |
 | [viewer-controller.ts](../web/src/lib/transport/viewer-controller.ts) | `setQueryAndWait`: settle on displayed replacement, failure, supersession, or disposal |
 
 ## Persistence contract
@@ -44,8 +45,12 @@ binary. Source data and browser session preferences remain in memory.
 retained applied query specification without unmounting. The selected source
 supplies command/mode; stdin supplies empty command/`auto`. Prepared tabs without
 sources supply their command/mode drafts and locally stored settings. Executed
-tabs exclude unsubmitted drafts and pending query specifications. Clone copies a persisted document into
-an unsaved draft with a new name; create assigns a new ID. Save changes only the file.
+tabs exclude unsubmitted drafts and pending query specifications. Clone copies a
+persisted document into an unsaved draft with a new name; create assigns a new ID.
+Save changes only the file. Capture and Load reject a pending tab mutation.
+
+The following load sequence applies to an existing source viewer; prepared tabs
+use the local path described below.
 
 ```mermaid
 sequenceDiagram
@@ -70,6 +75,8 @@ sequenceDiagram
 Loading never executes or changes the source process. Query failure preserves the
 previous display and columns. Tab changes/disposal reject stale completion. Editor
 revision keys reset drafts even when loaded values equal the existing applied values.
+`App.loadConfiguration` checks `selectionRevision`, source ID, pending mutation,
+and (after viewer application) viewer identity across asynchronous boundaries.
 
 Blank command tabs retain validated configurations locally until their first Run.
 Loading a command configuration from stdin creates a prepared command tab without
@@ -107,7 +114,10 @@ unchanged. A new tab opened with + starts with default settings.
   state, regex feedback, replacement completion/failure/cancellation.
 - [Browser tests](../web/e2e/configurations.spec.ts): capture/edit/clone/restart/load/run,
   editor resets, raw/pending input, focus, unsaved changes, and source-removal races.
-  [Command tests](../web/e2e/commands.spec.ts) verify inherited settings remain isolated.
+  They also cover saving/loading a prepared tab before its first Run, creating a
+  command tab when loading from stdin, and commandless configurations staying on stdin.
+  [Command tests](../web/e2e/commands.spec.ts) verify retained settings remain isolated
+  and new tabs start with defaults.
 
 Run `make check`, `make build`, and
 `bun run --bun --filter @streamline/web test:e2e configurations.spec.ts commands.spec.ts`.

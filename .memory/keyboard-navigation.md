@@ -1,7 +1,8 @@
 # Keyboard navigation framework
 
-The frontend routes application shortcuts through one `CommandRegistry`. Components
-own command behavior; the registry owns matching, scope selection, and dispatch.
+The frontend routes global application shortcuts through one `CommandRegistry`.
+Components own command behavior; the registry owns matching, scope selection,
+and dispatch. The tab strip handles its local navigation keys in `SourceTabs`.
 There are no backend keyboard APIs or user-configurable keymaps.
 
 ## Source map
@@ -12,7 +13,8 @@ Paths below are relative to the repository root.
 | --- | --- |
 | `web/src/lib/keyboard.ts` | `Command`, `KeyboardOverlay`, binding matching, registry, window listener, label formatting |
 | `web/src/lib/keyboard-context.ts` | Svelte context and mount/unmount registration helpers |
-| `web/src/App.svelte` | Registry ownership and window attachment across source switches |
+| `web/src/App.svelte` | Registry ownership and window attachment across tab/source switches |
+| `web/src/lib/components/SourceTabs.svelte` | Local tab keys, roving focus, close focus restoration, active-tab scrolling |
 | `web/src/lib/components/SourceViewer.svelte` | Sidebar/Escape commands, active row, preview visibility; registrations follow mounted source |
 | `web/src/lib/components/VirtualLogTable.svelte` | Row commands, `navigate`, virtual scrolling, focus restoration, selection/follow coordination |
 | `web/src/lib/row-navigation.ts`, `web/src/lib/virtual-window.ts` | Navigation interfaces, bigint validation, clamping, bounded segments |
@@ -136,6 +138,26 @@ with scoped `Mod+Enter`. Bits UI traps focus and restores the toolbar trigger.
 Escape/outside dismissal prevents closing while busy or while a dirty draft awaits
 save/discard. See [saved configurations](saved-configurations.md#validation-and-interaction).
 
+## Tab navigation
+
+`SourceTabs.svelte` handles keydown on tab buttons locally; these keys are not
+registered global commands and do not change text-editor navigation.
+
+| Key/action | Behavior |
+| --- | --- |
+| Left/Right | Select and focus the previous/next tab, wrapping at either end |
+| Home/End | Select and focus the first/last tab |
+| Delete | Close the focused command tab; stdin and pending tabs ignore close |
+| + button | Open a selected blank command tab, then focus its editor after `tick()` |
+| Close button | Stop/discard that tab; active close selects right neighbor, otherwise left; background close preserves selection |
+
+Only the selected tab button has `tabindex="0"`; others have `-1`. Separate
+close buttons remain keyboard reachable. After a close initiated with focus in
+the strip, focus returns to the selected tab unless the user moved focus outside
+the strip while the operation was pending. A failed close keeps its tab and error.
+Selection and resize scrolling reveal the whole active tab, including close.
+There are no global new-tab/close-tab shortcuts.
+
 ## Row navigation and async focus
 
 `ActiveRow` contains query ID, generation ID, zero-based `bigint` result offset,
@@ -213,6 +235,8 @@ last paused row resumes at the latest streamed tail.
   queries restoring tail following.
 - `web/e2e/keyboard.spec.ts`: actual focus, Tab addition, scoped Apply, virtual
   eviction, delayed/failed pages, streaming, and platform mapping.
+- `web/tests/tabs.test.ts` and `web/e2e/commands.spec.ts`: tab selection/close,
+  stdin protection, editor focus, local tab keys, and overflow visibility.
 
 Run `bun run check`, `bun run test`, and `bun run test:e2e` from `web/`.
 Platform mappings are browser-tested; native OS interception requires testing

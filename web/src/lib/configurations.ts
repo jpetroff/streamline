@@ -40,8 +40,11 @@ export function parseConfigurationDraft(draft: ConfigurationDraft): { document?:
   try { filters = JSON.parse(draft.filters); } catch { add('filters', 'Enter valid JSON.'); }
   if (!Array.isArray(columns) || !columns.length) add('columns', 'Enter a nonempty JSON array of columns.');
   else columns.forEach((column, index) => {
-    if (!object(column) || Object.keys(column).some(key => !['path', 'dateFormat'].includes(key)) || typeof column.path !== 'string' || !column.path.trim() || !DATE_FORMAT_OPTIONS.some(option => option.value === column.dateFormat)) {
+    if (!object(column) || Object.keys(column).some(key => !['path', 'dateFormat', 'width'].includes(key)) || typeof column.path !== 'string' || !column.path.trim() || !DATE_FORMAT_OPTIONS.some(option => option.value === column.dateFormat)) {
       add('columns', 'Each column requires a nonempty path and supported dateFormat.', index + 1);
+    }
+    if (object(column) && column.width !== undefined && (typeof column.width !== 'number' || !Number.isFinite(column.width) || column.width < 144)) {
+      add('columns', 'width must be a finite number of at least 144 pixels.', index + 1);
     }
   });
   if (!object(filters) || Object.keys(filters).some(key => !['filter', 'search'].includes(key))) add('filters', 'Enter an object with filter and search.');
@@ -68,6 +71,9 @@ export class HTTPConfigurationAPI {
   constructor(private readonly baseURL = '/api/v1/configurations') {}
   list() { return fetch(this.baseURL).then(responseJSON<ConfigurationListing>); }
   get(id: string) { return fetch(`${this.baseURL}/${encodeURIComponent(id)}`).then(responseJSON<ConfigurationEntry>); }
+  async remove(id: string): Promise<void> {
+    await fetch(`${this.baseURL}/${encodeURIComponent(id)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json', 'X-Streamline-Request': '1' } }).then(responseJSON);
+  }
   validate(document: Configuration) { return this.send<Configuration>('POST', '/validate', document); }
   save(document: Configuration, id?: string) { return this.send<ConfigurationEntry>(id ? 'PUT' : 'POST', id ? `/${encodeURIComponent(id)}` : '', document); }
   private send<T>(method: string, suffix: string, document: Configuration) {
