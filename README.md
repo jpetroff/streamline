@@ -218,10 +218,27 @@ a reload between discard and creation can interrupt the replacement.
 With a tab focused, use Left/Right, Home/End to select tabs and Delete to close a
 command tab. The tab strip scrolls horizontally when needed; **+** stays accessible.
 
-**Auto** uses the same log detection as stdin: JSON, logfmt, syslog, HTTP access, and timestamped logs stream
+**Auto** uses the default stdin log detection: JSON, logfmt, syslog, HTTP access, and timestamped logs stream
 progressively, while unrecognized plain output appears when the command finishes
 or is stopped. **Text** displays each sanitized, nonempty line immediately,
-without interpreting JSON or timestamps. Command tabs without inherited settings
+without interpreting JSON or timestamps. **JSON document** validates one complete
+JSON object or array of objects at EOF, then displays one row per object. Choose
+it for pretty-printed JSON such as CrowdSec alert exports; nested fields stay
+intact. Malformed documents appear as raw output without partial rows. Use finite
+commands such as `cat /path/to/crowdsec.log`; open streams wait for EOF.
+
+Stdin supports the same modes through `-stdin-mode` (default `auto`):
+
+```sh
+streamline -stdin-mode=json-document < crowdsec.log
+```
+
+Timestamp aliases remain unchanged: CrowdSec's `created_at` and `start_at` can be
+selected as columns, while the canonical timestamp remains empty. JSON document
+mode can also be saved in version-1 configurations. Loading a configuration does
+not change the mode of an existing source or stdin's startup mode.
+
+Command tabs without inherited settings
 default to normalized `timestamp`, `severity`, and `message` columns. Switching tabs retains applied
 search, filters, columns, follow preference, and the selected result position.
 

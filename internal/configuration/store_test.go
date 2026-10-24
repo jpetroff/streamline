@@ -18,6 +18,20 @@ import (
 func sample() Document {
 	return Document{Version: 1, Name: "Errors", Command: "  printf 'hello\\n'\n", Mode: "auto", Columns: []Column{{Path: "timestamp", DateFormat: "iso"}, {Path: "message", DateFormat: "original"}}, Filters: Filters{Filter: query.FilterList{{Field: "level", Op: "regex", Value: "error|fatal"}}, Search: &query.SearchSpec{Text: "timeout\n\nretry ", Mode: "regexp", Operator: "or"}}}
 }
+
+func TestJSONDocumentModeRoundTrip(t *testing.T) {
+	store := New(t.TempDir())
+	doc := sample()
+	doc.Mode = "json-document"
+	entry, err := store.Save("", doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := store.Get(entry.ID)
+	if err != nil || !reflect.DeepEqual(restored.Document, doc) {
+		t.Fatalf("document mode round trip = %#v, %v", restored, err)
+	}
+}
 func TestRoundTripCloneTransferAndExternalEdits(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "settings")
 	store := New(directory)

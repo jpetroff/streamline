@@ -55,14 +55,15 @@ See [transport contracts](transport.md#independent-command-sources) for endpoint
 | Shell text passed unchanged to `/bin/sh -c` | Quotes, pipes, redirects, and expansion use POSIX shell rules; inherit binary cwd/environment. `shellPath` is a private startup-test seam. |
 | New OS session via `Setsid`; null stdin | Isolates command input from app stdin and enables group signals. PTY/input forwarding requires a separate transport and terminal lifecycle. |
 | One pipe for stdout and stderr | Preserve received bytes; stream identity and independent buffering order are unavailable. Close the parent's writer immediately after Start. |
-| Auto is the default | JSON objects, complete logfmt, syslog, HTTP access, or timestamped text establish parsed output. Unrecognized output is buffered until recognition or terminal raw fallback. Text bypasses recognition and emits sanitized retained frames. |
+| Auto is the default | JSON objects, complete logfmt, syslog, HTTP access, or timestamped text establish parsed output. Unrecognized output is buffered until recognition or terminal raw fallback. Text bypasses recognition and emits sanitized retained frames. JSON document validates a complete object/object array at clean EOF before emitting any records. |
 | Capture and terminal publication are separate | Pipe EOF alone is insufficient: process exit may still fail. Flush final records/partial lines before `finish` publishes status. |
 | Browser lifetime does not own capture | Switching, reload, query expiry, and disconnect never stop a process. Run again discards the old capture and creates a replacement in the same UI tab. |
 | In-memory retention | Parser buffers and query data can grow. Batch/page limits do not cap total capture memory; persistence/eviction need explicit ownership rules. |
 
 Configured source mode, per-record `SourceFormat`, query `InputKind`, and terminal
-`InputStatus` are separate domains. `mode=text` maps to `Options.Text=true` for a
-new command capture; stdin always uses Auto. The parser specification defines
+`InputStatus` are separate domains. Command modes map to `Options.Mode`; supported
+values are `auto`, `text`, and `json-document`. Stdin defaults to Auto and selects
+its startup mode with `-stdin-mode`; its source descriptor reports that mode. The parser specification defines
 [mode semantics](parser.md#configured-modes),
 [selection precedence](parser.md#parser-selection-and-extension), and
 [capture/publication ordering](parser.md#capture-publication-and-terminal-status).

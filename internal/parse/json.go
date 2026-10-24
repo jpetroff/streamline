@@ -30,3 +30,11 @@ func decodeJSON(input string) (any, error) {
 func normalizeJSON(fields map[string]any, context parseContext, diagnostics []logmodel.Diagnostic) logmodel.Record {
 	return normalizeFields(fields, logmodel.FormatJSON, context, diagnostics)
 }
+
+// normalizeJSONObject shares specialization between line and document framing.
+func normalizeJSONObject(fields map[string]any, context parseContext, diagnostics []logmodel.Diagnostic) logmodel.Record {
+	if looksLikeJournald(fields) {
+		return normalizeJournald(fields, diagnostics)
+	}
+	return normalizeJSON(fields, context, diagnostics)
+}

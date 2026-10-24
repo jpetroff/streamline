@@ -54,7 +54,7 @@ func TestSelectorPrecedenceAndMixedFormats(t *testing.T) {
 
 func TestTextModeBypassesAllParsers(t *testing.T) {
 	input := "\x1b[31m" + `msg=one msg=two` + "\x1b[0m\n" + `msg="broken` + "\n" + `{"message":"json"}` + "\n2026-01-01T00:00:00Z timestamp"
-	result, err := NewEngine(Options{Text: true}).Load(strings.NewReader(input))
+	result, err := NewEngine(Options{Mode: ModeText}).Load(strings.NewReader(input))
 	if err != nil {
 		t.Fatal(err)
 	}

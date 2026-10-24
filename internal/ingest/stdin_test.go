@@ -129,3 +129,59 @@ func TestRunPublishesLogfmtBeforeEOF(t *testing.T) {
 		t.Fatal("ingestion did not finish")
 	}
 }
+
+func TestJSONDocumentPublicationWaitsForValidation(t *testing.T) {
+	for _, suffix := range []string{"", " trailing", ", null]"} {
+		t.Run(suffix, func(t *testing.T) {
+			service := query.NewMemoryService(nil)
+			t.Cleanup(service.Close)
+			reader, writer := io.Pipe()
+			t.Cleanup(func() { reader.Close(); writer.Close() })
+			done := make(chan struct{})
+			go func() {
+				Run(context.Background(), reader, parse.NewEngine(parse.Options{Mode: parse.ModeJSONDocument}), service)
+				close(done)
+			}()
+			prefix := `[{"message":"ready"}]`
+			if suffix == ", null]" {
+				prefix = `[{"message":"ready"}`
+			}
+			if _, err := io.WriteString(writer, prefix); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(2 * maxBatchDelay)
+			if session := service.Session(context.Background()); session.InputKind != query.InputPending || session.InputStatus != query.InputStreaming {
+				t.Fatalf("published before EOF: %#v", session)
+			}
+			if _, err := io.WriteString(writer, suffix); err != nil {
+				t.Fatal(err)
+			}
+			writer.Close()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("capture did not finish")
+			}
+			session := service.Session(context.Background())
+			want := query.InputRecords
+			if suffix != "" {
+				want = query.InputRaw
+			}
+			if session.InputKind != want || session.InputStatus != query.InputEOF {
+				t.Fatalf("terminal session = %#v", session)
+			}
+			if want == query.InputRaw {
+				page, err := service.Raw(context.Background(), session.GenerationID, 0, 4)
+				if err != nil || strings.Join(page.Chunks, "") != prefix+suffix {
+					t.Fatalf("raw output = %#v, %v", page, err)
+				}
+			}
+		})
+	}
+	service := query.NewMemoryService(nil)
+	t.Cleanup(service.Close)
+	Run(context.Background(), strings.NewReader("[]"), parse.NewEngine(parse.Options{Mode: parse.ModeJSONDocument}), service)
+	if session := service.Session(context.Background()); session.InputKind != query.InputRecords || session.InputStatus != query.InputEOF {
+		t.Fatalf("empty document = %#v", session)
+	}
+}

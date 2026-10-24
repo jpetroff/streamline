@@ -43,7 +43,9 @@ binary. Source data and browser session preferences remain in memory.
 
 **Save current as new:** `snapshot()` copies applied columns/date formats and the
 retained applied query specification without unmounting. The selected source
-supplies command/mode; stdin supplies empty command/`auto`. Prepared tabs without
+supplies command/mode; stdin supplies an empty command and its actual startup mode.
+Modes `auto`, `text`, and `json-document` are supported in version 1. Loading a
+configuration does not change stdin's startup mode. Prepared tabs without
 sources supply their command/mode drafts and locally stored settings. Executed
 tabs exclude unsubmitted drafts and pending query specifications. Clone copies a
 persisted document into an unsaved draft with a new name; create assigns a new ID.

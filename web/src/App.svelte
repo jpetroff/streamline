@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
+  import type { SourceMode } from '$lib/transport/types';
   import { provideKeyboard } from '$lib/keyboard-context';
   import SourceViewer from '$lib/components/SourceViewer.svelte';
   import SourceTabs from '$lib/components/SourceTabs.svelte';
@@ -100,12 +101,12 @@
             rows="2" placeholder="ssh -o BatchMode=yes host 'journalctl -f -o json --no-pager'" spellcheck="false"
             class="min-w-40 flex-1 resize-y rounded border border-input bg-background p-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring"></textarea>
           <label class="flex flex-col gap-1 text-xs">Output mode
-            <select value={selected.mode} onchange={event => tabs.patch(selected.id, { mode: event.currentTarget.value as 'auto' | 'text' })}
-              class="h-8 rounded border border-input bg-background px-2"><option value="auto">Auto</option><option value="text">Text</option></select>
+            <select value={selected.mode} onchange={event => tabs.patch(selected.id, { mode: event.currentTarget.value as SourceMode })}
+              class="h-8 rounded border border-input bg-background px-2"><option value="auto">Auto</option><option value="text">Text</option><option value="json-document">JSON document</option></select>
           </label>
           <button type="submit" disabled={!!selected.pending || !selected.command.trim()} class="mt-5 rounded bg-primary px-3 py-2 text-xs text-primary-foreground disabled:opacity-40">{selected.pending === 'run' ? 'Starting…' : 'Run'}</button>
         </div>
-        <p class="text-xs text-muted-foreground">{selected.mode === 'auto' ? 'Auto detects structured logs; plain output appears when the command ends. Choose Text to view every line live.' : 'Text displays each output line immediately.'}</p>
+        <p class="text-xs text-muted-foreground">{selected.mode === 'auto' ? 'Auto detects structured logs; plain output appears when the command ends. Choose Text to view every line live.' : selected.mode === 'json-document' ? 'JSON document displays one row per object after the complete input is validated at EOF.' : 'Text displays each output line immediately.'}</p>
       </form>
     {/if}
     {#if selected.info?.kind === 'command'}

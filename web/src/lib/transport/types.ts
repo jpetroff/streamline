@@ -1,3 +1,5 @@
+export type SourceMode = 'auto' | 'text' | 'json-document';
+
 /** Base-10 integer serialized as a string to preserve the Go service's 64-bit range. */
 export type Decimal = string;
 /** Current state of the binary's input producer. */
@@ -134,7 +136,7 @@ export interface LogSource {
   id: string;
   kind: 'stdin' | 'command';
   command?: string;
-  mode: 'auto' | 'text';
+  mode: SourceMode;
   state: 'starting' | 'running' | 'stopping' | 'exited' | 'failed' | 'stopped';
   createdAt: string;
   finishedAt?: string;
@@ -143,4 +145,4 @@ export interface LogSource {
   session: Session;
 }
 
-export interface CommandRequest { command: string; mode: 'auto' | 'text'; }
+export interface CommandRequest { command: string; mode: SourceMode; }

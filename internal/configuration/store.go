@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	"streamline/internal/parse"
 	"streamline/internal/query"
 )
 
@@ -125,8 +126,8 @@ func Validate(doc Document) error {
 	if strings.TrimSpace(doc.Name) == "" {
 		add("name", "Enter a name.")
 	}
-	if doc.Mode != "auto" && doc.Mode != "text" {
-		add("mode", "Choose auto or text.")
+	if !parse.Mode(doc.Mode).Valid() {
+		add("mode", "Choose auto, text, or json-document.")
 	}
 	if len(doc.Columns) == 0 {
 		add("columns", "Enter at least one column.")

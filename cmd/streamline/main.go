@@ -16,6 +16,7 @@ import (
 
 	"streamline/internal/configuration"
 	"streamline/internal/httpapi"
+	"streamline/internal/parse"
 	"streamline/internal/source"
 	"streamline/internal/webassets"
 )
@@ -31,6 +32,7 @@ func main() {
 	showVersion := flag.Bool("v", false, "print build version and exit")
 	port := flag.Int("port", 8080, "localhost port (0 selects an available port)")
 	configDir := flag.String("config-dir", "", "directory for saved configurations")
+	stdinMode := flag.String("stdin-mode", "auto", "stdin parser mode: auto, text, or json-document")
 	flag.Parse()
 	if *showVersion {
 		fmt.Printf("streamline %s (built %s, commit %s)\n", version, buildTime, commitHash)
@@ -40,18 +42,23 @@ func main() {
 		slog.Error("port must be between 0 and 65535")
 		os.Exit(2)
 	}
+	mode := parse.Mode(*stdinMode)
+	if !mode.Valid() {
+		slog.Error("stdin-mode must be auto, text, or json-document")
+		os.Exit(2)
+	}
 	directory, err := configuration.ResolveDirectory(*configDir)
 	if err != nil {
 		slog.Error("resolve configuration directory", "error", err)
 		os.Exit(2)
 	}
-	if err := run(*port, directory); err != nil {
+	if err := run(*port, directory, mode); err != nil {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(port int, directory string) error {
+func run(port int, directory string, stdinMode parse.Mode) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -67,7 +74,7 @@ func run(port int, directory string) error {
 	if err != nil {
 		return fmt.Errorf("open stdin: %w", err)
 	}
-	sources.StartStdin(stdin)
+	sources.StartStdin(stdin, stdinMode)
 
 	server := &http.Server{
 		Handler:           httpapi.NewConfiguredSourceHandler(webassets.Handler(), sources, configuration.New(directory), webassets.TrustedOrigins()...),

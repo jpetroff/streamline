@@ -34,6 +34,33 @@ async function run(page: Page, command: string, mode = 'text', newTab = true) {
   await expect(page.getByRole('tablist', { name: 'Log sources' }).locator('[role="tab"][aria-selected="true"]')).toHaveAttribute('title', command);
 }
 
+test('JSON document mode displays alert objects and preserves its mode on rerun and reload', async ({ page, request }) => {
+  await page.goto(apiURL);
+  const command = `printf '%s' '[
+    {"message":"first alert","created_at":"2026-10-24T13:10:25Z","source":{"ip":"192.0.2.1"},"events":[{"message":"nested event"}]},
+    {"message":"second alert","events_count":2}
+  ]'`;
+  await run(page, command, 'json-document');
+  await expect(page.getByRole('cell', { name: 'first alert', exact: true })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'second alert', exact: true })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'nested event', exact: true })).toHaveCount(0);
+  await page.getByLabel('Column paths', { exact: true }).fill('message\nsource.ip\ncreated_at\nevents');
+  await page.getByLabel('Column paths', { exact: true }).press('Control+Enter');
+  await expect(page.getByRole('cell', { name: '192.0.2.1', exact: true })).toBeVisible();
+  await expect(page.getByRole('cell', { name: '2026-10-24T13:10:25Z', exact: true })).toBeVisible();
+  await page.getByLabel('Output mode').selectOption('auto');
+  await page.getByRole('button', { name: 'Run again', exact: true }).click();
+  await expect(page.getByRole('cell', { name: 'first alert', exact: true })).toBeVisible();
+  await expect.poll(async () => {
+    const sources = await request.get(`${apiURL}/api/v1/sources`).then(r => r.json());
+    return sources.find((source: { kind: string }) => source.kind === 'command')?.mode;
+  }).toBe('json-document');
+  await page.reload();
+  await page.getByRole('tab', { name: /first alert/ }).click();
+  await expect(page.getByLabel('Output mode')).toHaveValue('json-document');
+  await expect(page.getByRole('cell', { name: 'second alert', exact: true })).toBeVisible();
+});
+
 test('concurrent commands retain isolated output, reruns, and stopped tabs across reload', async ({ page }) => {
   await page.goto(apiURL);
   await run(page, "printf 'first log\\n'; sleep 30");

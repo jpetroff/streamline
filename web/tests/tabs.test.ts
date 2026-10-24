@@ -68,6 +68,27 @@ test('Run again uses the executed command/mode without overwriting a newer draft
   expect(tabs.state.tabs).toHaveLength(2);
 });
 
+test('JSON document mode survives execution, discovery and Run again with a newer draft', async () => {
+  const requests: CommandRequest[] = [];
+  const { tabs } = setup({ create: async request => {
+    requests.push({ ...request });
+    return { ...source(`json-${requests.length}`, request.command), mode: request.mode };
+  } });
+  const id = tabs.open();
+  tabs.patch(id, { command: 'cat alerts.json', mode: 'json-document' });
+  await tabs.run(id);
+  tabs.patch(id, { command: 'new draft', mode: 'auto' });
+  await tabs.run(id, undefined, true);
+  expect(requests).toEqual([
+    { command: 'cat alerts.json', mode: 'json-document' },
+    { command: 'cat alerts.json', mode: 'json-document' },
+  ]);
+  expect(tabs.get(id)?.mode).toBe('auto');
+  const external = { ...source('external'), mode: 'json-document' as const };
+  tabs.receive([tabs.get(id)!.info!, external]);
+  expect(tabs.state.tabs.find(tab => tab.sourceId === 'external')?.mode).toBe('json-document');
+});
+
 test('failed discard retains the source; failed creation retains an empty editable tab', async () => {
   let failDelete = true;
   const { tabs } = setup({ remove: async () => { if (failDelete) throw new Error('discard failed'); }, create: async () => { throw new Error('start failed'); } });

@@ -33,10 +33,7 @@ func selectParser(input string, context parseContext, diagnostics []logmodel.Dia
 			return parseDecision{Record: normalizeText(input, context, diagnostics)}
 		}
 		object = cleanJSONObject(object, &diagnostics)
-		if looksLikeJournald(object) {
-			return parseDecision{Record: normalizeJournald(object, diagnostics), IdentifiesLogs: true}
-		}
-		return parseDecision{Record: normalizeJSON(object, context, diagnostics), IdentifiesLogs: true}
+		return parseDecision{Record: normalizeJSONObject(object, context, diagnostics), IdentifiesLogs: true}
 	}
 
 	// 2. A leading key=value token is a logfmt candidate. Only a complete

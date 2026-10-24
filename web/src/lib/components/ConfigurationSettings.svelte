@@ -155,8 +155,9 @@
             <fieldset disabled={busy} class="min-w-0 space-y-3">
               <div class="flex gap-3">
                 <label class="min-w-0 flex-1 space-y-1 text-xs">Name<input class={input} bind:value={draft.name} /></label>
-                <label class="space-y-1 text-xs">Output mode<select class={input} bind:value={draft.mode}><option value="auto">Auto</option><option value="text">Text</option></select></label>
+                <label class="space-y-1 text-xs">Output mode<select class={input} bind:value={draft.mode}><option value="auto">Auto</option><option value="text">Text</option><option value="json-document">JSON document</option></select></label>
               </div>
+              {#if draft.mode === 'json-document'}<p class="text-xs text-muted-foreground">Rows appear after the complete JSON input is validated at EOF.</p>{/if}
               <label class="block space-y-1 text-xs">Command<textarea class={`${input} min-h-20 font-mono`} rows="3" bind:value={draft.command} spellcheck="false"></textarea></label>
               <label class="block space-y-1 text-xs">Column setup (JSON)<textarea class={`${input} min-h-32 font-mono`} rows="7" bind:value={draft.columns} spellcheck="false" aria-describedby="saved-columns-help"></textarea></label>
               <p id="saved-columns-help" class="text-xs text-muted-foreground">Example: <code>{'[{"path":"message","dateFormat":"original","width":400}]'}</code>. Width is optional, in pixels (minimum 144).</p>

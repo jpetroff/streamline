@@ -374,7 +374,7 @@ func TestTextModePublishesSanitizedLinesWithoutDetection(t *testing.T) {
 	records := make(chan []CapturedRecord, 4)
 	done := make(chan error, 1)
 	go func() {
-		_, err := NewEngine(Options{Text: true}).Stream(reader, func(batch []CapturedRecord) { records <- batch })
+		_, err := NewEngine(Options{Mode: ModeText}).Stream(reader, func(batch []CapturedRecord) { records <- batch })
 		done <- err
 	}()
 	if _, err := io.WriteString(writer, "\x1b[31mplain\x1b[0m\n\n{\"message\":\"json stays text\"}\n"); err != nil {

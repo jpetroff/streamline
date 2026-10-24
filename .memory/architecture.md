@@ -144,7 +144,7 @@ For a practical entry point, see the [parser overview](parser.md#start-here),
 
 ```mermaid
 flowchart LR
-  Mode["Source mode: auto or text"] --> Engine["Engine.Stream invocation"]
+  Mode["Source mode: auto, text, or json-document"] --> Engine["Engine.Stream invocation"]
   Engine -->|"auto"| Select["Per-frame selection: parseDecision"]
   Engine -->|"text"| Literal["plainText and initial recognized=true"]
   Literal --> Format
@@ -270,6 +270,6 @@ expressions escaped through `regexp.QuoteMeta`. Empty search is the identity.
 ## Command source execution
 
 [Command log sources](command-sources.md) documents manager/process ownership,
-Auto/Text parsing, Stop and shutdown sequencing, source switching, decisions,
+Auto/Text/JSON document parsing, Stop and shutdown sequencing, source switching, decisions,
 and debugging/tests. [Transport](transport.md#independent-command-sources) owns
 the wire contract; [frontend](frontend.md#source-viewer-lifecycle) owns rendering.

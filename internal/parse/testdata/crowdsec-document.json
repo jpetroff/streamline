@@ -1,0 +1,227 @@
+[
+  {
+    "capacity": 1,
+    "created_at": "2026-10-24T13:10:25Z",
+    "decisions": null,
+    "events": [
+      {
+        "meta": [
+          {
+            "key": "rule_name",
+            "value": "crowdsecurity/vpatch-git-config"
+          },
+          {
+            "key": "message",
+            "value": "Detect access to .git files"
+          },
+          {
+            "key": "uri",
+            "value": "/.git/config"
+          },
+          {
+            "key": "matched_zones",
+            "value": "REQUEST_FILENAME"
+          },
+          {
+            "key": "data"
+          },
+          {
+            "key": "target_fqdn",
+            "value": "example.test"
+          }
+        ],
+        "timestamp": "2026-10-24 13:10:24 +0000 UTC"
+      }
+    ],
+    "events_count": 1,
+    "id": 24118,
+    "kind": "waf",
+    "labels": null,
+    "leakspeed": "",
+    "machine_id": "example-machine",
+    "message": "Example CrowdSec alert 1",
+    "meta": [
+      {
+        "key": "user_agent",
+        "value": "[\"Mozilla/5.0 (Macintosh; Intel Mac OS X 15_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0\"]"
+      },
+      {
+        "key": "msg",
+        "value": "[\"Detect access to .git files\"]"
+      },
+      {
+        "key": "method",
+        "value": "[\"GET\"]"
+      },
+      {
+        "key": "target_uri",
+        "value": "[\"/.git/config\"]"
+      },
+      {
+        "key": "ja4h",
+        "value": "[\"ge11nn05enus_48fb0cf591c4_000000000000_000000000000\"]"
+      },
+      {
+        "key": "name",
+        "value": "[\"crowdsecurity/vpatch-git-config\"]"
+      },
+      {
+        "key": "matched_zones",
+        "value": "[\"REQUEST_FILENAME\"]"
+      }
+    ],
+    "scenario": "crowdsecurity/vpatch-git-config",
+    "scenario_hash": "bbecbd81b916253467e28f0743bed9680c92d4a47ac4890e9819378a46982914",
+    "scenario_version": "0.5",
+    "simulated": false,
+    "source": {
+      "as_name": "Example network",
+      "as_number": "64496",
+      "cn": "US",
+      "ip": "192.0.2.1",
+      "latitude": 41.2591,
+      "longitude": -95.8517,
+      "range": "192.0.2.0/24",
+      "scope": "Ip",
+      "value": "192.0.2.1"
+    },
+    "start_at": "2026-10-24T13:10:24Z",
+    "stop_at": "2026-10-24T13:10:24Z",
+    "uuid": "00000000-0000-4000-8000-000000000001"
+  },
+  {
+    "capacity": 0,
+    "created_at": "2026-10-24T09:19:55Z",
+    "decisions": [
+      {
+        "duration": "735h0m41s",
+        "id": 115329889,
+        "origin": "crowdsec",
+        "scenario": "crowdsecurity/http-cve-2021-41773",
+        "scope": "Ip",
+        "simulated": false,
+        "type": "ban",
+        "value": "192.0.2.2"
+      }
+    ],
+    "events": [
+      {
+        "meta": [
+          {
+            "key": "ASNNumber",
+            "value": "51167"
+          },
+          {
+            "key": "ASNOrg",
+            "value": "Contabo GmbH"
+          },
+          {
+            "key": "IsInEU",
+            "value": "true"
+          },
+          {
+            "key": "IsoCode",
+            "value": "FR"
+          },
+          {
+            "key": "SourceRange",
+            "value": "212.47.64.0/20"
+          },
+          {
+            "key": "datasource_path",
+            "value": "/var/log/caddy-lxc/access.log"
+          },
+          {
+            "key": "datasource_type",
+            "value": "file"
+          },
+          {
+            "key": "http_args_len",
+            "value": "0"
+          },
+          {
+            "key": "http_path",
+            "value": "/cgi-bin/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/bin/sh"
+          },
+          {
+            "key": "http_status",
+            "value": "308"
+          },
+          {
+            "key": "http_user_agent",
+            "value": "libredtail-http"
+          },
+          {
+            "key": "http_verb",
+            "value": "POST"
+          },
+          {
+            "key": "log_type",
+            "value": "http_access-log"
+          },
+          {
+            "key": "service",
+            "value": "http"
+          },
+          {
+            "key": "source_ip",
+            "value": "192.0.2.2"
+          },
+          {
+            "key": "target_fqdn",
+            "value": "example.test"
+          },
+          {
+            "key": "timestamp",
+            "value": "2026-10-24T12:19:55+03:00"
+          }
+        ],
+        "timestamp": "2026-10-24 12:19:55 +0300 +0300"
+      }
+    ],
+    "events_count": 1,
+    "id": 24116,
+    "kind": "crowdsec",
+    "labels": null,
+    "leakspeed": "0s",
+    "machine_id": "example-machine",
+    "message": "Example CrowdSec alert 2",
+    "meta": [
+      {
+        "key": "status",
+        "value": "[\"308\"]"
+      },
+      {
+        "key": "target_uri",
+        "value": "[\"/cgi-bin/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/bin/sh\"]"
+      },
+      {
+        "key": "method",
+        "value": "[\"POST\"]"
+      },
+      {
+        "key": "user_agent",
+        "value": "[\"libredtail-http\"]"
+      }
+    ],
+    "remediation": true,
+    "scenario": "crowdsecurity/http-cve-2021-41773",
+    "scenario_hash": "f3fa755209fab221d6bbe04abd835c6539034cd72521725f960cdb36157e4313",
+    "scenario_version": "0.3",
+    "simulated": false,
+    "source": {
+      "as_name": "Example network",
+      "as_number": "64496",
+      "cn": "FR",
+      "ip": "192.0.2.2",
+      "latitude": 48.9742,
+      "longitude": 8.1851,
+      "range": "192.0.2.0/24",
+      "scope": "Ip",
+      "value": "192.0.2.2"
+    },
+    "start_at": "2026-10-24T09:19:55Z",
+    "stop_at": "2026-10-24T09:19:55Z",
+    "uuid": "00000000-0000-4000-8000-000000000002"
+  }
+]

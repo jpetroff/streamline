@@ -1,13 +1,13 @@
 import { configureColumns } from './columns';
 import type { SourcePreferences } from './transport/sources';
-import type { CommandRequest, LogSource } from './transport/types';
+import type { CommandRequest, LogSource, SourceMode } from './transport/types';
 
 export interface SourceTab {
   id: string;
   sourceId?: string;
   info?: LogSource;
   command: string;
-  mode: 'auto' | 'text';
+  mode: SourceMode;
   preferences?: SourcePreferences;
   pending?: 'run' | 'stop' | 'close';
   error: string;

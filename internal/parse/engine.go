@@ -10,16 +10,30 @@ import (
 	"streamline/internal/logmodel"
 )
 
-// Options supplies context for timestamps that omit a timezone or year.
+// Mode selects input framing and interpretation. The zero value means Auto.
+type Mode string
+
+const (
+	ModeAuto         Mode = "auto"
+	ModeText         Mode = "text"
+	ModeJSONDocument Mode = "json-document"
+)
+
+// Valid reports whether mode is a supported, explicit source mode.
+func (mode Mode) Valid() bool {
+	return mode == ModeAuto || mode == ModeText || mode == ModeJSONDocument
+}
+
+// Options selects a mode and supplies context for incomplete timestamps.
 type Options struct {
-	// Text emits sanitized lines immediately without structured-log detection.
-	Text            bool
+	Mode            Mode
 	DefaultLocation *time.Location
 	ReferenceTime   time.Time
 }
 
 // CapturedRecord connects a normalized entry to its exact source byte range.
-// RawEnd is exclusive and includes the original line delimiter when present.
+// RawEnd is exclusive. Line modes include the original delimiter when present;
+// document mode covers only the object, excluding surrounding JSON separators.
 type CapturedRecord struct {
 	Entry    logmodel.Record
 	RawStart int
@@ -91,14 +105,19 @@ func (e *Engine) Load(reader io.Reader) (*LoadResult, error) {
 // after the first recognizable log record. A preamble is buffered until that
 // decision and emitted before the recognizing record. If the reader fails,
 // bytes read before the failure are finalized and returned with the wrapped error.
+// JSON document mode instead waits for clean EOF and validates the entire source
+// before emitting any records; interrupted or invalid documents remain raw.
 func (e *Engine) Stream(reader io.Reader, emit func([]CapturedRecord)) (*LoadResult, error) {
+	if e.options.Mode == ModeJSONDocument {
+		return e.streamJSONDocument(reader, emit)
+	}
 	result := &LoadResult{}
 	context := e.context()
 	records := make([]CapturedRecord, 0)
 	frameStart := 0
 	scanPosition := 0
 	emitted := 0
-	recognized := e.options.Text
+	recognized := e.options.Mode == ModeText
 	buffer := make([]byte, 32<<10)
 
 	processFrame := func(source frame) {
@@ -130,7 +149,7 @@ func (e *Engine) Stream(reader io.Reader, emit func([]CapturedRecord)) (*LoadRes
 		}
 
 		decision := parseDecision{Record: plainText(cleaned.text, diagnostics)}
-		if !e.options.Text {
+		if e.options.Mode != ModeText {
 			decision = selectParser(cleaned.text, context, diagnostics)
 		}
 		records = append(records, CapturedRecord{

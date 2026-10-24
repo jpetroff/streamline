@@ -9,13 +9,14 @@ are independent; their values are not interchangeable.
 
 Auto detection uses the contents of each sanitized physical line. It does not
 inspect the filename, command name, file extension, or which service produced
-the bytes. Stdin and command sources use the same detection path.
+the bytes. Stdin and command sources use the same engine for their selected mode.
 
 For each retained line, the engine selects one parser, creates a normalized
 record, and asks whether that line identifies the input as logs. One recognizing
 line starts publication of all buffered records; subsequent lines are still
 detected independently. Text mode skips detection and publishes literal
-sanitized lines.
+sanitized lines. JSON document mode instead waits for clean EOF and validates
+one complete object or array of objects before publishing any rows.
 
 - [Execution stages](#execution-stages-and-ownership): framing, cleanup, parsing,
   and publication.
@@ -33,10 +34,10 @@ sanitized lines.
 
 | Domain | Scope and owner | Values | Function |
 | --- | --- | --- | --- |
-| Configured mode | One source invocation; source manager | `auto`, `text` | Selects whether format recognition executes |
-| Parser option | One immutable `Engine`; `parse.Options.Text` | `false`, `true` | Internal representation of Auto and Text |
+| Configured mode | One source invocation; source manager | `auto`, `text`, `json-document` | Selects framing and interpretation |
+| Parser option | One immutable `Engine`; `parse.Options.Mode` | `ModeAuto`, `ModeText`, `ModeJSONDocument`; zero value means Auto | Internal source-mode selection |
 | Recognition decision | One retained frame; `selectParser` | `parseDecision{Record, IdentifiesLogs}` | Produces a record and determines whether it constitutes evidence for structured stream output |
-| Stream classification | One `Engine.Stream` invocation; `recognized` | `false`, `true` | Controls callback eligibility and final result variant; transition is monotonic |
+| Line-stream classification | One Auto/Text `Engine.Stream` invocation; `recognized` | `false`, `true` | Controls callback eligibility and final result variant; transition is monotonic |
 | Record provenance | One `logmodel.Record`; `SourceFormat` | `journald-json`, `json`, `logfmt`, `syslog-rfc5424`, `syslog-rfc3164`, `syslog-text`, `http-access`, `text` | Identifies the normalization path |
 | Parser result variant | One completed load; `LoadResult.Kind` | `parsed`, `raw` | Selects `ParsedResult` or `RawResult` |
 | Query input kind | One source query service; `Session.InputKind` | `pending`, `records`, `raw` | Identifies the representation currently available to transport consumers |
@@ -50,39 +51,78 @@ selectable parser. Process lifecycle states such as `running`, `failed`, and
 
 ## Configured modes
 
-| Property | Auto | Text |
-| --- | --- | --- |
-| Engine construction | `Options{Text: false}`; zero-value default | `Options{Text: true}` |
-| Initial `recognized` value | `false` | `true` |
-| Format selection | `selectParser` executes for each retained frame | Selector is bypassed; `plainText` executes |
-| Record contents | Format-specific normalization or text fallback | Sanitized line in `Message`; `SourceFormat=text`; no fields, timestamp, or severity |
-| Callback eligibility | Begins after the first recognizing frame | Begins with the first retained complete frame |
-| Unrecognized prefix | Buffered records; emitted in input order after recognition | No recognition buffer delay |
-| Final result | `parsed` if any frame recognizes logs; otherwise `raw` | `parsed`, including an empty record set |
-| Diagnostics | Cleanup, recognition, and normalization diagnostics | Cleanup and truncation diagnostics only |
+| Property | Auto | Text | JSON document |
+| --- | --- | --- | --- |
+| Engine construction | `Options{}` or `Mode: ModeAuto` | `Mode: ModeText` | `Mode: ModeJSONDocument` |
+| Framing | Physical lines | Physical lines | Complete JSON document |
+| Format selection | `selectParser` per retained frame | `plainText`, no selector | Object normalization, no line selector |
+| Record contents | Format-specific normalization or text fallback | Sanitized literal line, no fields/timestamp/severity | One record per object; nested values preserved |
+| Callback eligibility | After first recognizing line | First retained complete line | After clean EOF and complete validation |
+| Final result | Parsed if any line recognizes logs; otherwise raw | Parsed, including empty input | Parsed for object/object array, including `[]`; otherwise raw |
+| Diagnostics | Cleanup, recognition, normalization | Cleanup/truncation | Cleanup/normalization on records; document failures at load level |
 
-The command source API defaults an omitted or empty mode to `auto`, validates
-`auto` or `text`, and rejects other values with `invalid_mode`. The command
-runner maps `mode == "text"` to `Options.Text`. Stdin uses `Options{}` and
-therefore Auto. There is no runtime source-mode mutation or individual-format
-override. Saved configurations persist the source mode; loading a configuration
-prepares a subsequent run without reclassifying an existing source.
+The command source API defaults an omitted or empty mode to `auto`, accepts
+`auto`, `text`, and `json-document`, and rejects other values with `invalid_mode`.
+Command capture passes the selected mode to `Options.Mode`. Stdin defaults to
+Auto and supports `-stdin-mode=auto|text|json-document`; the CLI rejects invalid
+values before startup. Source descriptors report the selected mode.
+There is no runtime source-mode mutation. Version-1 saved configurations persist
+all three modes; loading one prepares a subsequent run without reclassifying an
+existing source. Loading a commandless configuration cannot change stdin's
+startup mode.
 
-"Callback eligibility" refers to `Engine.Stream`. It is not a synchronous UI
-publication guarantee: framing requires a complete line or terminal partial line,
-and ingestion applies an additional batching interval.
+Callback eligibility refers to `Engine.Stream`, not synchronous UI publication;
+ingestion still applies its batching interval.
+
+### JSON document contract
+
+`json_document.go` reads and retains all original source bytes before decoding.
+It accepts exactly one object or an array containing only objects, with JSON
+whitespace and arbitrary pretty printing. An object produces one record, an array
+preserves element order, and `[]` produces an empty parsed result. Nested arrays
+and objects remain fields; wrapper objects are not unwrapped, events are not
+expanded, and JSON encoded inside strings is not recursively parsed.
+
+Decoding uses original bytes. Terminal decoration outside valid JSON is a syntax
+failure rather than something removed before recognition. Decoded keys/values
+receive the existing cleanup, with invalid UTF-8 replacement diagnosed. Objects
+share generic JSON normalization and journald specialization with the line parser;
+`SourceFormat` remains `json` or `journald-json`. Numbers remain `json.Number`.
+Timestamp aliases remain `timestamp`, `time`, `ts`, and `@timestamp`; CrowdSec's
+`created_at` and `start_at` remain selectable fields without a canonical timestamp.
+
+No callback occurs until clean EOF and the entire document and every element
+validate. The closing bracket alone is insufficient. Empty input, syntax errors,
+truncation, trailing content, and multiple JSON values (including JSONL) produce
+raw output with `malformed_json_document`. Scalar roots and non-object array
+members produce raw output with `unsupported_json_document`. Each diagnostic
+covers the full source interval and remains load-level, not transported as a row.
+Reader failures also produce raw output without records, retain all received
+bytes, add `input_read_error`, and return the wrapped error. No error is returned
+for JSON syntax/shape fallback, consistent with Auto's raw fallback convention.
+
+Decoder offsets and raw object lengths establish each record's exact half-open
+byte span, excluding surrounding whitespace, commas, and root array brackets.
+No sanitized-text-to-source offset mapping is needed. Retention is in memory;
+long-running streams remain pending until EOF.
 
 ## Execution stages and ownership
 
 ```mermaid
 flowchart TD
-  Reader["io.Reader bytes"] --> Frame["Engine: retain source bytes and frame input"]
+  Reader["io.Reader bytes"] --> Framing{"Options.Mode"}
+  Framing -->|"auto or text"| Frame["Engine: retain source bytes and frame lines"]
+  Framing -->|"json-document"| Document["Retain bytes until clean EOF; validate entire document"]
+  Document --> Valid{"Object or array of objects?"}
+  Valid -->|"no or read failure"| Raw["Sanitized raw result; no records"]
+  Valid -->|"yes"| Objects["Clean and normalize objects; retain object spans"]
+  Objects --> Batch
   Frame --> Clean["sanitizeBytes: terminal controls and UTF-8"]
   Clean --> Retain{"Retain frame?"}
   Retain -->|"no"| Skip["Skip whitespace-only or recognized pager frame"]
-  Retain -->|"yes"| Mode{"Options.Text"}
-  Mode -->|"true"| Literal["plainText: SourceFormat=text"]
-  Mode -->|"false"| Selector["selectParser: ordered per-frame decision"]
+  Retain -->|"yes"| Mode{"Options.Mode"}
+  Mode -->|"text"| Literal["plainText: SourceFormat=text"]
+  Mode -->|"auto"| Selector["selectParser: ordered per-frame decision"]
   Literal --> Capture["CapturedRecord: Entry and raw byte interval"]
   Selector --> Capture
   Capture --> Gate["Engine: update recognition state and emit eligible records"]
@@ -95,6 +135,7 @@ flowchart TD
 | --- | --- | --- |
 | Stream mechanics | [engine.go](../internal/parse/engine.go) | Reads bytes; retains source; frames, sanitizes, filters frames; updates recognition state; emits records; selects final result |
 | Format selection | [selector.go](../internal/parse/selector.go) | Owns ordered recognition and `parseDecision`; has no stream or process state |
+| JSON document framing | [json_document.go](../internal/parse/json_document.go) | Waits for clean EOF; validates document and object roots; retains object spans; publishes atomically |
 | JSON decoding | [json.go](../internal/parse/json.go) | Decodes exactly one JSON value with `json.Number`; invokes shared field normalization |
 | Journald interpretation | [journald.go](../internal/parse/journald.go) | Recognizes journal field structure and normalizes journal-specific values |
 | Logfmt decoding | [logfmt.go](../internal/parse/logfmt.go) | Scans a complete key/value line; preserves string values; invokes shared field normalization |
@@ -105,13 +146,13 @@ flowchart TD
 | Shared primitives | [timestamp.go](../internal/parse/timestamp.go), [severity.go](../internal/parse/severity.go), [diagnostic.go](../internal/parse/diagnostic.go), [sanitize.go](../internal/parse/sanitize.go) | Timestamp context, severity mappings, diagnostic deduplication, terminal and UTF-8 handling |
 | Publication | [stdin.go](../internal/ingest/stdin.go) | Batches entries and separates capture completion from terminal status publication |
 
-Framing recognizes LF, CRLF, lone CR, and a final unterminated line. A CR at a
+In Auto and Text, framing recognizes LF, CRLF, lone CR, and a final unterminated line. A CR at a
 read boundary is deferred until the next byte or terminal read establishes
 whether a following LF belongs to the same delimiter. A single read can contain
 multiple frames; a frame can span multiple reads. There is no scanner token-size
 limit. Escaped newlines decoded inside structured values do not create frames.
 
-Sanitization occurs before selection. Valid UTF-8 sequences are consumed as
+In line modes, sanitization occurs before selection. Valid UTF-8 sequences are consumed as
 complete runes so continuation bytes are not interpreted as C1 controls.
 Decoded structured strings are sanitized again after unescaping. Whitespace-only
 frames are omitted. Recognized pager filler/status frames are omitted only when
@@ -120,8 +161,8 @@ these transformations.
 
 ## Stream classification state machine
 
-For retained frame `i`, define `d_i = parseDecision.IdentifiesLogs`. The engine
-uses the recurrence `r_0 = Options.Text`, `r_i = r_(i-1) OR d_i`. Skipped frames
+For Auto and Text, for retained frame `i`, define `d_i = parseDecision.IdentifiesLogs`. The engine
+uses the recurrence `r_0 = (Options.Mode == ModeText)`, `r_i = r_(i-1) OR d_i`. Skipped frames
 do not change `r`. Once `r` becomes true, subsequent record-level failures cannot
 return the stream to raw eligibility. Text mode retains `r=true` without calling
 the selector.
@@ -132,8 +173,12 @@ stateDiagram-v2
   state "Records eligible for emission" as Active
   state "LoadResult.Kind = parsed" as Parsed
   state "LoadResult.Kind = raw" as Raw
-  [*] --> Pending: Options.Text = false
-  [*] --> Active: Options.Text = true
+  state "Document: awaiting clean EOF" as DocumentPending
+  [*] --> DocumentPending: JSON document mode
+  DocumentPending --> Parsed: clean EOF / valid document and object roots
+  DocumentPending --> Raw: invalid document or read error
+  [*] --> Pending: Auto mode
+  [*] --> Active: Text mode
   Pending --> Pending: retained frame / IdentifiesLogs = false
   Pending --> Active: retained frame / IdentifiesLogs = true
   Active --> Active: retained frame / any recognition result
@@ -143,7 +188,7 @@ stateDiagram-v2
   Raw --> [*]
 ```
 
-The terminal transitions occur after processing the final partial frame, if any.
+For line modes, terminal transitions occur after processing the final partial frame, if any.
 While pending, the engine buffers normalized fallback records without invoking
 the callback. On recognition, the next emission includes every un-emitted
 record, including the prefix, in input order. Later fallback records remain
@@ -151,7 +196,7 @@ eligible for emission. `emitReady` executes after processing available frames
 from each read that supplies bytes and after terminal framing. `Load(reader)` uses the
 same path with a nil callback and returns the complete result.
 
-At completion, exactly one result pointer is non-nil:
+At completion, exactly one result pointer is non-nil. For line modes:
 
 | Final classification | Result invariant |
 | --- | --- |
@@ -299,7 +344,8 @@ in all parsed cases.
 1. Define the new format's recognition predicate, decoding failure semantics,
    normalization rules, and precedence relative to existing formats.
 2. Implement format-specific behavior in a named file and add an explicit branch
-   to `selectParser`; keep read loops, offsets, and publication outside the parser.
+   to `selectParser` for line formats. A different framing mode dispatches before
+   line selection, as JSON document mode does; keep their contracts separate.
 3. Return `parseDecision` with recognition evidence independent of normalization
    diagnostics. Reuse common helpers only where the source semantics match.
 4. For a new provenance value, update Go `SourceFormat` and the TypeScript
@@ -484,10 +530,11 @@ sequenceDiagram
   Owner->>Query: Completion.Publish via SetInputStatus or SetRawOutput
 ```
 
-`Engine.Stream` has no context parameter. It returns a partial result plus a
-wrapped error for a non-EOF read failure and adds `input_read_error` at
+`Engine.Stream` has no context parameter. Line modes return a partial result plus a
+wrapped error for a non-EOF read failure and add `input_read_error` at
 `[len(Source), len(Source))`. Bytes returned together with a read error are
-processed before completion. `ingest.Capture` adds cancellation and batching;
+processed before completion in line modes. Document mode retains those bytes as
+raw without publishing records. `ingest.Capture` adds cancellation and batching;
 source owners must close blocking readers when interruption is required.
 
 `Capture` forwards `Entry` values, flushes batches of 512 records, and flushes a
@@ -516,10 +563,10 @@ HTTP row/raw endpoints transfer content; SSE transfers state notifications only.
 | Evidence | Owner and scope | Availability |
 | --- | --- | --- |
 | Exact bytes | `LoadResult.Source` | Returned by `Engine.Load`/`Stream`; retained during that invocation |
-| Raw interval | `CapturedRecord.RawStart`, `RawEnd` | Half-open byte interval in `Source`, including the original delimiter when present |
+| Raw interval | `CapturedRecord.RawStart`, `RawEnd` | Half-open byte interval in `Source`; line modes include delimiters, document mode covers the object only |
 | Parser identity | `Record.SourceFormat` | Retained by ingestion/query and included in HTTP rows |
 | Record diagnostics | `Record.Diagnostics` | Retained for emitted records and included in HTTP rows |
-| Skipped-frame diagnostics | `LoadResult.Diagnostics` | `terminal_artifact_skipped`, with the skipped interval; not forwarded by ingestion |
+| Skipped-frame diagnostics | `LoadResult.Diagnostics` | Skipped-frame and JSON document failure diagnostics, with their intervals; not forwarded by ingestion |
 | Read failure | Returned error and `LoadDiagnostic` | Error translated into terminal input status; the full load-diagnostic list is not transported |
 
 Raw intervals are not copied into query rows. `Capture` does not retain the
@@ -539,6 +586,8 @@ codes can also occur in Text mode; parser-specific codes cannot.
 | Invalid UTF-8 replaced | `invalid_utf8_replaced` |
 | Recognized terminal-only/pager frame omitted | `terminal_artifact_skipped` |
 | Pager truncation marker detected | `terminal_truncated` |
+| JSON document syntax, truncation, empty input, or trailing values | `malformed_json_document` |
+| JSON document root or array member is not an object | `unsupported_json_document` |
 | JSON-shaped line cannot decode as one complete value | `malformed_json_fallback` |
 | Valid JSON root is not an object | `unsupported_json_root` |
 | Complete logfmt candidate cannot be scanned | `malformed_logfmt_fallback` |
@@ -562,8 +611,9 @@ correlation at the parser boundary.
 | Observation | Explanation and next check |
 | --- | --- |
 | Auto shows no rows while a command runs | No complete recognizing frame may have arrived. Check the final newline and child buffering; try a new Text-mode run for immediate line display. A format name in the command does not select a parser. |
-| A `.json` file is shown as raw | Detection ignores extensions. Check for object-per-line output, array roots, pretty-printed multiline JSON, or prefixes before the object. |
+| A `.json` file is shown as raw | Detection ignores extensions. Auto expects object-per-line output. Choose JSON document for a complete object/array, or use `-stdin-mode=json-document` for stdin. Prefixes outside JSON remain invalid in document mode. |
 | A line beginning with a bracketed timestamp is not parsed as a text log | A leading `[` claims the JSON branch first. Invalid JSON is not offered to timestamp/syslog detection afterward. |
+| JSON document shows no rows while input remains open | Publication waits for clean EOF and full validation, even after a closing bracket. Use finite producer output. |
 | Timestamp appears, but app or request fields are absent | The record may be timestamped `text`. Syslog needs the supported host/tag header; access logs need the exact Common/Combined layout. |
 | Docker/Compose JSON appears as message text | Timestamp/container prefixes can hide the JSON prefix. The parser does not unwrap them or recursively parse a `log`/`message` value. Use unprefixed structured producer output when possible. |
 | HTTP 503 or an “error” message has no severity | HTTP and unprioritized local syslog do not infer severity from status or prose. Filter HTTP `status` numerically; filter message text for prose. |
@@ -603,7 +653,13 @@ captures are checked for raw fallback and safe display without assuming that
 every capture contains standalone pager frames; deterministic tests cover pager
 diagnostics.
 
-Multiline JSON, stack-trace grouping, journal export records, recursive message
-parsing, per-format manual overrides, source replay, and bounded capture storage
-are outside the implemented parser contract. Additions must preserve or explicitly
+Automatic multiline detection, stack-trace grouping, journal export records,
+recursive message parsing, source replay, and bounded capture storage are outside
+the implemented parser contract. Multiline JSON is supported explicitly through
+JSON document mode. Additions must preserve or explicitly
 revise the decision domains and invariants above.
+
+
+The representative `testdata/crowdsec-document.json` fixture contains two alerts.
+Run the document acceptance test against the original 50-alert attachment with
+`STREAMLINE_CROWDSEC_DOCUMENT=/path/to/crowdsec.log go test ./internal/parse -run TestJSONDocumentCrowdSec`.

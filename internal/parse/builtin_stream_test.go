@@ -57,7 +57,7 @@ func TestBuiltInTextParsersMixedStreamingAndOffsets(t *testing.T) {
 	}
 
 	// Forced Text bypasses every new format, including malformed candidates.
-	options.Text = true
+	options.Mode = ModeText
 	literal, err := NewEngine(options).Load(iotest.OneByteReader(strings.NewReader(input)))
 	if err != nil || literal.Kind != ResultParsed || len(literal.Parsed.Records) != len(frames) {
 		t.Fatal("text mode records changed")

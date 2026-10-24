@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"streamline/internal/parse"
 	"streamline/internal/query"
 )
 
@@ -242,7 +243,7 @@ func TestValidationStdinAndLifecycleSubscription(t *testing.T) {
 	defer unsubscribe()
 	<-events
 	reader, writer := io.Pipe()
-	m.StartStdin(reader)
+	m.StartStdin(reader, parse.ModeAuto)
 	fmt.Fprintln(writer, `{"message":"stdin"}`)
 	writer.Close()
 	eventually(t, func() bool { return m.List()[0].State == "exited" })
@@ -269,7 +270,7 @@ func TestShutdownInterruptsOpenOSStdinPipe(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := New()
-	m.StartStdin(input)
+	m.StartStdin(input, parse.ModeAuto)
 	done := make(chan struct{})
 	go func() { m.Close(); close(done) }()
 	select {

@@ -44,7 +44,7 @@ func (m *Manager) run(s *input) {
 	m.mu.Unlock()
 	captured := make(chan ingest.Completion, 1)
 	go func() {
-		captured <- ingest.Capture(context.Background(), reader, parse.NewEngine(parse.Options{Text: s.info.Mode == "text"}), &sourceSink{manager: m, input: s})
+		captured <- ingest.Capture(context.Background(), reader, parse.NewEngine(parse.Options{Mode: parse.Mode(s.info.Mode)}), &sourceSink{manager: m, input: s})
 	}()
 	waited := make(chan error, 1)
 	go func() { waited <- cmd.Wait() }()

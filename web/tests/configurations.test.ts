@@ -6,6 +6,12 @@ function preferences(): SourcePreferences {
   return { spec: { filter: [{ field: 'level', op: 'regex', value: 'error' }], sort: 'input', search: { text: 'retry\n\ntimeout ', mode: 'regexp', operator: 'and' } },
     columns: [{ path: 'timestamp', dateFormat: 'iso', width: 280.5 }, { path: 'message', dateFormat: 'original' }], following: false, offset: 44n, rowLines: 2 };
 }
+
+test('JSON document configurations preserve mode through capture, editing and validation', () => {
+  const doc = configurationFromPreferences(preferences(), 'cat crowdsec.log', 'json-document');
+  doc.name = 'Alerts';
+  expect(parseConfigurationDraft(draftFromConfiguration(doc))).toEqual({ document: doc, errors: [], warnings: [] });
+});
 test('configuration snapshots round trip text, columns, formats and search without session state or shared references', () => {
   const source = preferences();
   const doc = configurationFromPreferences(source, "  printf 'hello\\n'\n", 'text');

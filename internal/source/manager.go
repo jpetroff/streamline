@@ -122,7 +122,7 @@ func (m *Manager) changedLocked() {
 }
 
 // StartStdin transfers ownership of reader until Manager.Close.
-func (m *Manager) StartStdin(reader io.ReadCloser) {
+func (m *Manager) StartStdin(reader io.ReadCloser, mode parse.Mode) {
 	m.mu.Lock()
 	if m.closed || m.stdinDone != nil {
 		m.mu.Unlock()
@@ -130,10 +130,15 @@ func (m *Manager) StartStdin(reader io.ReadCloser) {
 	}
 	m.stdin, m.stdinDone = reader, make(chan struct{})
 	s, done := m.inputs["stdin"], m.stdinDone
+	if mode == "" {
+		mode = parse.ModeAuto
+	}
+	s.info.Mode = string(mode)
+	m.changedLocked()
 	m.mu.Unlock()
 	go func() {
 		defer close(done)
-		completion := ingest.Capture(context.Background(), reader, parse.NewEngine(parse.Options{}), &sourceSink{manager: m, input: s})
+		completion := ingest.Capture(context.Background(), reader, parse.NewEngine(parse.Options{Mode: mode}), &sourceSink{manager: m, input: s})
 		completion.Publish(s.queries, nil)
 		m.mu.Lock()
 		defer m.mu.Unlock()
@@ -155,8 +160,8 @@ func (m *Manager) Create(request CreateRequest) (Info, error) {
 	if request.Mode == "" {
 		request.Mode = "auto"
 	}
-	if request.Mode != "auto" && request.Mode != "text" {
-		return Info{}, sourceError("invalid_mode", "mode must be auto or text")
+	if !parse.Mode(request.Mode).Valid() {
+		return Info{}, sourceError("invalid_mode", "mode must be auto, text, or json-document")
 	}
 	if !supported {
 		return Info{}, sourceError("unsupported_platform", "command sources require Linux or macOS")

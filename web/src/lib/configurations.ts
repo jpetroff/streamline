@@ -1,7 +1,7 @@
 import { DATE_FORMAT_OPTIONS, type ColumnConfig } from './columns';
 import { validateFilters } from './filters';
 import { EMPTY_SEARCH, validateSearch } from './search';
-import type { FilterSpec, SearchSpec } from './transport/types';
+import type { FilterSpec, SearchSpec, SourceMode } from './transport/types';
 import type { SourcePreferences } from './transport/sources';
 import { responseJSON } from './transport/api';
 
@@ -9,7 +9,7 @@ export interface Configuration {
   version: 1;
   name: string;
   command: string;
-  mode: 'auto' | 'text';
+  mode: SourceMode;
   columns: ColumnConfig[];
   filters: { filter: FilterSpec[]; search: SearchSpec };
 }
@@ -20,8 +20,8 @@ export interface ConfigurationListing {
   entries: ConfigurationEntry[];
   errors: { file: string; message: string; issues?: ConfigurationIssue[] }[];
 }
-export interface ConfigurationDraft { name: string; command: string; mode: 'auto' | 'text'; columns: string; filters: string }
-export function configurationFromPreferences(preferences: SourcePreferences, command = '', mode: 'auto' | 'text' = 'auto'): Configuration {
+export interface ConfigurationDraft { name: string; command: string; mode: SourceMode; columns: string; filters: string }
+export function configurationFromPreferences(preferences: SourcePreferences, command = '', mode: SourceMode = 'auto'): Configuration {
   return { version: 1, name: '', command, mode,
     columns: preferences.columns.map(column => ({ ...column })),
     filters: { filter: preferences.spec.filter.map(filter => ({ ...filter })), search: { ...(preferences.spec.search ?? EMPTY_SEARCH) } } };
@@ -34,7 +34,7 @@ export function parseConfigurationDraft(draft: ConfigurationDraft): { document?:
   const errors: ConfigurationIssue[] = [], warnings: ConfigurationIssue[] = [];
   const add = (field: string, message: string, index?: number) => errors.push({ field, message, index });
   if (!draft.name.trim()) add('name', 'Enter a name.');
-  if (!['auto', 'text'].includes(draft.mode)) add('mode', 'Choose auto or text.');
+  if (!['auto', 'text', 'json-document'].includes(draft.mode)) add('mode', 'Choose auto, text, or json-document.');
   let columns: unknown, filters: unknown;
   try { columns = JSON.parse(draft.columns); } catch { add('columns', 'Enter valid JSON.'); }
   try { filters = JSON.parse(draft.filters); } catch { add('filters', 'Enter valid JSON.'); }

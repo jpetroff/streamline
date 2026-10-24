@@ -209,7 +209,7 @@ another source's routes.
 | --- | --- |
 | `GET /sources` | Ordered array of source descriptors, stdin first |
 | `GET /sources/events` | Named `sources` SSE events containing the authoritative descriptor array; initial state on every connection, one-slot change queue, 15-second heartbeats |
-| `POST /sources` | `{ "command": "...", "mode": "auto" }`; mode defaults to `auto`, also accepts `text`; returns `202` with a new source |
+| `POST /sources` | `{ "command": "...", "mode": "auto" }`; mode defaults to `auto`, also accepts `text` and `json-document`; returns `202` with a new source |
 | `POST /sources/{id}/stop` | Idempotent Stop request; returns `204` before cleanup finishes |
 | `DELETE /sources/{id}` | Stop and join the producer, then release source data and queries; returns `204` |
 
